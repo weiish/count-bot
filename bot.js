@@ -245,18 +245,27 @@ const initializeCount = async (server_id, channel_id, client, repeatInterval) =>
 }
 
 
-const getMessages = async (server_id, channel_id, callback) => {
-    let messages = await query(`SELECT * FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} ORDER BY timestamp`)
-    console.log(messages)
-    callback(messages)
+const getMessages = (server_id, channel_id, callback) => {
+    query(`SELECT * FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} ORDER BY timestamp`,
+        (err, rows) => {
+          if (err) throw err;
+
+          return callback(rows);
+        })
 }
 
 const checkCounter = async (server_id, channel_id, callback) => {
-    console.log('Starting check counter')
-  let results = await query(
-    `SELECT count FROM counters WHERE server_id = ${server_id} AND channel_id = ${channel_id}`
+  await query(
+    `SELECT count FROM counters WHERE server_id = ${server_id} AND channel_id = ${channel_id}`,
+    async (err, rows) => {
+      if (err) throw err;
+      if (rows.length > 0) {
+        return callback(rows[0].count);
+      } else {
+        return callback();
+      }
+    }
   );
-  callback(results[0].count)
 };
 
 const insertCounter = async (server_id, channel_id, count) => {
@@ -266,13 +275,23 @@ const insertCounter = async (server_id, channel_id, count) => {
       server_id,
       channel_id,
       count
+    },
+    async (err, res) => {
+      if (err) throw err;
+      await dbCommit(connection, "Inserted new counter");
+      return
     }
   );
 };
 
 const updateCounter = async (server_id, channel_id, count) => {
   await query(
-    `UPDATE counters SET count = ${count} WHERE server_id = ${server_id} AND channel_id = ${channel_id}`
+    `UPDATE counters SET count = ${count} WHERE server_id = ${server_id} AND channel_id = ${channel_id}`,
+    async (err, result) => {
+      if (err) throw err;
+      await dbCommit(connection, "Updated counter");
+      return
+    }
   );
 };
 
@@ -281,11 +300,17 @@ const markMessageCount = async (server_id, channel_id, message_id, count) => {
     `marking message ${server_id} / ${channel_id} / ${message_id} as count ${count}`
   );
   await query(
-    `UPDATE messages SET count = ${count} WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND message_id = ${message_id}`
+    `UPDATE messages SET count = ${count} WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND message_id = ${message_id}`,
+    async (err, result) => {
+      if (err) throw err;
+      console.log('Committing...')
+      await dbCommit(connection, "Marked a message as count " + count);
+    }
   );
 
   console.log('Awaiting check counter...')
   await checkCounter(server_id, channel_id, async result => {
+    console.log(result);
     if (result) {
       //NEED UPDATE
       await updateCounter(server_id, channel_id, count);
@@ -304,11 +329,18 @@ const getCountUsers = async (
   repeatInterval,
   callback
 ) => {
-  let results = await query(
+  await query(
     `SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count <= ${count} AND count >= ${count -
-      repeatInterval} AND count > 0`
-  )
-  callback(results);
+      repeatInterval} AND count > 0`,
+    (err, rows) => {
+      if (err) throw err;
+      if (rows.length > 0) {
+        return callback(rows);
+      } else {
+        return callback();
+      }
+    }
+  );
 };
 
 const tryParseAndFindNumber = (content, target) => {
@@ -385,6 +417,10 @@ const getInitialLog = async channel => {
                     message_content: message.cleanContent,
                     timestamp: message.createdAt,
                     count: -1
+                  },
+                  async (err, res) => {
+                    if (err) throw err;
+                    await dbCommit(connection);
                   }
                 );
               }
@@ -452,20 +488,16 @@ const findUser = async (id, callback) => {
   });
 };
 
-// const dbCommit = async (db, console_message) => {
-//     console.log('Starting dbCommit...')
-//   await connection.commit(async function(err) {
-//     console.log('Commit await...')
-//     if (err) {
-//       await connection.rollback(function() {
-//         throw err;
-//       });
-//     }
-//     console.log('Logging message')
-//     if (console_message) console.log(console_message);
-//   });
-//   console.log('Returning from dbCommit...')
-//   return
-// };
+const dbCommit = async (db, console_message) => {
+  await connection.commit(async function(err) {
+    if (err) {
+      await connection.rollback(function() {
+        throw err;
+      });
+    }
+    if (console_message) console.log(console_message);
+    return
+  });
+};
 
 client.login(keys.TOKEN);
