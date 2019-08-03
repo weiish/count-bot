@@ -7,34 +7,80 @@ const { connection, query } = require("./database/db");
 const moment = require("moment");
 const math = require("mathjs");
 
-let watchChannels = [];
-let admins = {}; //Save arrays of user ids under server_ids as the keys
+//Custom Files
+const { isCreator, addAdmin, remAdmin, 
+    loadAdmins, isAdminLocal, isAdminDB } = require('./admin')
+const { loadCounters, addCounter, remCounter, 
+    checkCounter, insertCounter, updateCounter } = require('./counter')
+const helper = require('./helper')
 
-client.on("ready", () => {
+let counters = {};
+let admins = {};
+
+client.on("ready", async () => {
+  admins = await loadAdmins();
+  counters = await loadCounters();
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
 client.on("message", msg => {
+  if (msg.author.bot) return;
+  handleCounters(msg);
   handleCommands(msg);
 });
 
-const handleCommands = async msg => {
-  if (msg.author.bot) return;
+const handleCounters = async msg => {
+    if (msg.content.indexOf(config.PREFIX) === 0) return;
+    
+    let server_id = msg.guild.id;
+    let channel_id = msg.channel.id;
 
+    //Check if current server/channel is being counted
+    let count = await checkCounter(server_id, channel_id);
+    if (!count) return;
+
+    //Check if user has already contributed to counter within limit
+    let previousUsers = await getLastUsers(server_id, channel_id, config.REPEAT_INTERVAL)
+    if (previousUsers) {
+        for (let i = 0; i < previousUsers.length; i++) {
+            if (previousUsers[i].user_id === msg.author.id) {
+                //TODO
+                //Add to user's non-count messages
+                return;
+            }
+        }
+    }
+    
+    let msgIsCount = tryParseAndFindNumber(msg.content, count)
+    if (msgIsCount) {
+        await updateCounter(server_id, channel_id, ++count)
+        await insertMessage(msg, count);
+        await msg.react('✅')
+    } else {
+        console.log('Message does not match the expected ' + count)
+    }
+}
+
+const handleCommands = async msg => {
   if (msg.content.indexOf(config.PREFIX) !== 0) return;
+
   const args = msg.content
     .slice(config.PREFIX.length)
     .trim()
     .split(/ +/g);
   const command = args.shift().toLowerCase();
 
-  //Admin commands
-  //Maybe swap logic for optimization and only check admins in DB if an ADMIN command is invoked
-  if (keys.ADMIN_IDS.includes(msg.author.id)) {
+  if (isCreator(msg.author.id)) {
     if (command === "logout" || command === "lo") {
-      msg.reply("Logging out, Bye!");
-      client.destroy();
-    } else if (command === "fetch") {
+        msg.reply("Logging out, Bye!");
+        client.destroy();
+    }
+  }
+
+  //Admin commands
+  const isAdmin = await isAdminLocal(admins, msg.guild.id, msg.author.id);
+  if (isAdmin) {
+     if (command === "fetch") {
       msg.reply("Fetching all messages in this channel...");
       getInitialLog(msg.channel);
     } else if (command === "initialize") {
@@ -45,26 +91,26 @@ const handleCommands = async msg => {
         client,
         config.REPEAT_INTERVAL
       );
-    } else if (command === "compare") {
-      await query(
-        `SELECT * FROM messages WHERE server_id = ${
-          msg.guild.id
-        } AND channel_id = ${msg.channel.id} ORDER BY timestamp`,
-        (err, rows) => {
-          if (err) throw err;
-          if (rows.length > 0) {
-            for (let i = 0; i < rows.length; i++) {
-              if (tryParseAndFindNumber(rows[i].message_content, 50)) {
-                console.log("FOUND 50!");
-              }
+    } else if (command === "admin") {
+        if (args[0] === "add" || args[0] === "a") {
+            //Get any mentions
+            let mentions = msg.mentions.users.array()
+            for (let i = 0; i < mentions.length; i++) {
+                let validUserID = await helper.isValidUserID(msg.guild, mentions[i].id)
+                if (validUserID) {
+                    let result = await addAdmin(admins, msg.guild.id, mentions[i].id, 1)
+                    msg.reply(result)
+                } else {
+                    msg.reply("That is not a valid user ID")
+                }
             }
-          }
+        } else if (args[0] === "remove" || args[0] === "r" || args[0] === "rem") {
+            let mentions = msg.mentions.users.array()
+            for (let i = 0; i < mentions.length; i++) {
+                let result = await remAdmin(admins, msg.guild.id, mentions[i].id)
+                msg.reply(result)
+            }
         }
-      );
-    } else if (command === "test") {
-      getCountUser(msg.guild.id, msg.channel.id, 1, user_id => {
-        console.log(user_id);
-      });
     }
   }
 
@@ -75,40 +121,15 @@ const handleCommands = async msg => {
     createUser(msg.author.id, sendMsg => {
       msg.reply(sendMsg);
     });
+  } else if (command === "count") {
+    let count = await checkCounter(msg.guild.id, msg.channel.id);
+    if (!count) {
+        msg.reply('There is no counting going on in this channel :(')
+    } else {
+        msg.reply(`I'm looking for someone to say **${count}**! :)`)
+    }
   }
 };
-
-const loadWatchChannels = () => {
-  //Load all watching channels into DB
-};
-
-const setWatchChannel = (server_id, channel_id) => {
-  //Check if server_id exists in DB
-  //If not, create entry for server_id and channel_id
-  //Or Update server_id to channel_id
-  //Also remove old channel_id from watchChannels variable and insert the new one
-  //ADMIN ONLY COMMAND
-};
-
-const deleteWatchChannel = (server_id, channel_id) => {};
-
-const saveWatchChannels = channels => {};
-
-const addAdmin = (server_id, user_id) => {
-  //ADD ADMIN TO DB
-};
-
-const remAdmin = (server_id, user_id) => {
-  //REMOVE ADMIN FROM DB
-};
-
-const loadAdmins = () => {
-  //LOAD ALL ADMINS FROM DB TO admins object
-};
-
-const checkMessage = (message) => {
-    
-}
 
 const initializeCount = async (
   server_id,
@@ -125,7 +146,6 @@ const initializeCount = async (
     //Checking each message in the DB
     for (let i = 0; i < messages.length; i++) {
       const current_db_message = messages[i];
-      console.log("Current message is ", current_db_message.id);
       if (tryParseAndFindNumber(current_db_message.message_content, count)) {
         console.log("Found count " + count + " at message number " + i);
         //Check if user is the last user who marked a count
@@ -138,7 +158,6 @@ const initializeCount = async (
         let shouldMark = true;
         console.log("Checking previous users");
         if (previousUsers) {
-            console.log(previousUsers)
           for (let a = 0; a < previousUsers.length; a++) {
             let user = previousUsers[a];
             if (user.user_id === current_db_message.user_id) {
@@ -163,8 +182,9 @@ const initializeCount = async (
               const collected = await client.channels
                 .get(channel_id)
                 .awaitMessages(
-                  m => {
-                    if (!keys.ADMIN_IDS.includes(m.author.id)) return false;
+                  async m => {
+                    const isAdmin = await isAdminLocal(admins, m.guild.id, m.author.id);
+                    if (!isAdmin) return false;
                     if (
                       m.content.toLowerCase() === "y" ||
                       m.content.toLowerCase() === "n"
@@ -263,8 +283,11 @@ const initializeCount = async (
         "No message log found for this channel, use **!fetch** first! (admin only)"
       );
   }
-  await client.channels.get(channel_id).send("Done initializing counters! Found counters up to " + count);
-  await client.channels.get(channel_id).send("If I'm missing a number, add it with **!addcount** *count_value* *message_id*");
+  await client.channels.get(channel_id).send("Done initializing counters! Found counters up to " + count + '\n' + 
+  "If I'm missing a number, add it with **!addcount** *count_value* *message_id*\n" + 
+  "Then use the command **!updatecount**" );
+  await addCounter(counters, server_id, channel_id, count)
+
 };
 
 const getMessages = async (server_id, channel_id) => {
@@ -277,27 +300,7 @@ const getMessages = async (server_id, channel_id) => {
   return;
 };
 
-const checkCounter = async (server_id, channel_id) => {
-  let results = await query(`SELECT count FROM counters WHERE server_id = ${server_id} AND channel_id = ${channel_id}`);
-  if (results.length > 0) {
-    return results[0].count;
-  }
-  return;
-};
 
-const insertCounter = async (server_id, channel_id, count) => {
-  await query("INSERT INTO counters SET ?", {
-    server_id,
-    channel_id,
-    count
-  });
-};
-
-const updateCounter = async (server_id, channel_id, count) => {
-  await query(
-    `UPDATE counters SET count = ${count} WHERE server_id = ${server_id} AND channel_id = ${channel_id}`
-  );
-};
 
 const markMessageCount = async (server_id, channel_id, message_id, count) => {
   console.log(
@@ -327,6 +330,11 @@ const getCountUsers = async (server_id, channel_id, count, repeatInterval) => {
   );
   return results;
 };
+
+const getLastUsers = async (server_id, channel_id, repeatInterval) => {
+  let results = await query(`SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} ORDER BY count DESC LIMIT ${repeatInterval}`)
+  return results;
+}
 
 const tryParseAndFindNumber = (content, target) => {
   //console.log("Initial content: ", content);
@@ -367,6 +375,32 @@ const tryParseAndFindNumber = (content, target) => {
   return false;
 };
 
+const insertMessage = async (message, count) => {
+    try {
+        await query("INSERT INTO messages SET ?", {
+            message_id: message.id,
+            server_id: message.guild.id,
+            channel_id: message.channel.id,
+            user_id: message.author.id,
+            message_content: message.cleanContent,
+            timestamp: message.createdAt,
+            count: count
+          });
+        return 'Message inserted!'
+    } catch (e) {
+        return 'Error inserting message :('
+    }
+}
+
+const cleanMessages = async (server_id, channel_id) => {
+    try {
+        await query(`DELETE FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count = -1`)
+        return "Cleaned DB messages for this server!"
+    } catch (e) {
+        return "Issue cleaning DB messages for this server... :("
+    }
+}
+
 const getInitialLog = async channel => {
   //Delay between loops
   let before;
@@ -392,15 +426,7 @@ const getInitialLog = async channel => {
             async (err, rows) => {
               if (err) throw err;
               if (rows.length === 0) {
-                await query("INSERT INTO messages SET ?", {
-                  message_id: message.id,
-                  server_id: message.guild.id,
-                  channel_id: message.channel.id,
-                  user_id: message.author.id,
-                  message_content: message.cleanContent,
-                  timestamp: message.createdAt,
-                  count: -1
-                });
+                  await insertMessage(message, -1);
               }
             }
           );
@@ -409,6 +435,7 @@ const getInitialLog = async channel => {
         //RECURSE IF MORE MESSAGES
         if (messages.array().length === limit) {
           console.log("Fetching more...");
+          channel.send("Fetching 100 more...")
           setTimeout(async () => {
             await fetchSomeMessages(channel, limit, newBefore);
           }, 2000);
@@ -423,62 +450,47 @@ const getInitialLog = async channel => {
   await fetchSomeMessages(channel, limit, before);
 };
 
+
 //Add reaction to msg that gets registered to the counter
 //Msg must be sent by user that is not the same as the last user
 //Bot internally tracks the count
 //Bot saves msg after the count
 
-const createUser = (id, sendMsg) => {
-  //Check if user already exists
-  findUser(id, user => {
-    if (!user) {
-      //User does not exist, create user
-      //Check if message already exists
-      query("INSERT INTO users SET ?", { id }, (err, res) => {
-        if (err) throw err;
-        connection.commit(function(err) {
-          if (err) {
-            connection.rollback(function() {
-              throw err;
-            });
-          }
-          console.log("ID inserted: " + id);
-          sendMsg("Account created!");
-        });
-      });
-    } else {
-      sendMsg("Account already exists");
-    }
-  });
-};
-
-const findUser = async (id, callback) => {
-  //Query MySQL for username
-  let foundUser;
-  await query(`SELECT * FROM users WHERE id = ${id}`, (err, rows) => {
-    if (err) throw err;
-    if (rows.length > 0) {
-      callback(rows[0]);
-    } else {
-      callback(0);
-    }
-  });
-};
-
-// const dbCommit = async (db, console_message) => {
-//     console.log('Starting dbCommit...')
-//   await connection.commit(async function(err) {
-//     console.log('Commit await...')
-//     if (err) {
-//       await connection.rollback(function() {
-//         throw err;
+// const createUser = (id, sendMsg) => {
+//   //Check if user already exists
+//   findUser(id, user => {
+//     if (!user) {
+//       //User does not exist, create user
+//       //Check if message already exists
+//       query("INSERT INTO users SET ?", { id }, (err, res) => {
+//         if (err) throw err;
+//         connection.commit(function(err) {
+//           if (err) {
+//             connection.rollback(function() {
+//               throw err;
+//             });
+//           }
+//           console.log("ID inserted: " + id);
+//           sendMsg("Account created!");
+//         });
 //       });
+//     } else {
+//       sendMsg("Account already exists");
 //     }
-//     console.log('Logging message')
-//     if (console_message) console.log(console_message);
 //   });
-//   console.log('Returning from dbCommit...')
-//   return
+// };
+
+// const findUser = async (id, callback) => {
+//   //Query MySQL for username
+//   let foundUser;
+//   await query(`SELECT * FROM users WHERE id = ${id}`, (err, rows) => {
+//     if (err) throw err;
+//     if (rows.length > 0) {
+//       callback(rows[0]);
+//     } else {
+//       callback(0);
+//     }
+//   });
 // };
 
 client.login(keys.TOKEN);
