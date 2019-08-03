@@ -91,6 +91,9 @@ const handleCommands = async msg => {
         client,
         config.REPEAT_INTERVAL
       );
+    } else if ( command === "cleanmessages") {
+       let result = await cleanMessages(msg.guild.id, msg.channel.id);
+        msg.reply(result);
     } else if (command === "admin") {
         if (args[0] === "add" || args[0] === "a") {
             //Get any mentions
@@ -147,7 +150,6 @@ const initializeCount = async (
     for (let i = 0; i < messages.length; i++) {
       const current_db_message = messages[i];
       if (tryParseAndFindNumber(current_db_message.message_content, count)) {
-        console.log("Found count " + count + " at message number " + i);
         //Check if user is the last user who marked a count
         let previousUsers = await getCountUsers(
           server_id,
@@ -156,7 +158,6 @@ const initializeCount = async (
           repeatInterval
         );
         let shouldMark = true;
-        console.log("Checking previous users");
         if (previousUsers) {
           for (let a = 0; a < previousUsers.length; a++) {
             let user = previousUsers[a];
@@ -323,7 +324,6 @@ const markMessageCount = async (server_id, channel_id, message_id, count) => {
 };
 
 const getCountUsers = async (server_id, channel_id, count, repeatInterval) => {
-    console.log('Checking previous users with count < ',count,'and count >=',count-repeatInterval)
   let results = await query(
     `SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count <= ${count} AND count > ${count -
       repeatInterval} AND count > 0`
@@ -407,7 +407,7 @@ const getInitialLog = async channel => {
   let limit = 100;
   console.log("Initializing fetch in channel id " + channel.id);
 
-  const fetchSomeMessages = async (channel, limit, before) => {
+  const fetchSomeMessages = async (channel, limit, before, total=0) => {
     let newBefore;
     channel
       .fetchMessages({ limit, before })
@@ -433,15 +433,18 @@ const getInitialLog = async channel => {
         });
 
         //RECURSE IF MORE MESSAGES
-        if (messages.array().length === limit) {
+        let numMessagesFetched = messages.array().length
+        if (numMessagesFetched === limit) {
           console.log("Fetching more...");
-          channel.send("Fetching 100 more...")
+          if (total % 200 === 0) {
+            channel.send("Fetching more...")
+          }
           setTimeout(async () => {
-            await fetchSomeMessages(channel, limit, newBefore);
+            await fetchSomeMessages(channel, limit, newBefore, total+numMessagesFetched);
           }, 2000);
         } else {
           console.log("DONE!");
-          channel.send("Done Fetching Messages!");
+          channel.send(`Done Fetching ${total + numMessagesFetched} Messages!`);
         }
       })
       .catch(console.error);
