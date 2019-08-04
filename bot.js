@@ -13,6 +13,7 @@ const { isCreator, addAdmin, remAdmin,
 const { loadCounters, addCounter, remCounter, 
     checkCounter, insertCounter, updateCounter } = require('./counter')
 const helper = require('./helper')
+const {CountStats} = require('./stats')
 
 let counters = {};
 let admins = {};
@@ -91,6 +92,44 @@ const handleCommands = async msg => {
         client,
         config.REPEAT_INTERVAL
       );
+    } else if (command === "track") {
+        let count = await checkCounter(msg.guild.id, msg.channel.id);
+        if (count) return msg.reply('This channel is already being tracked!');
+        
+        await addCounter(counters, msg.guild.id, msg.channel.id, 1);
+        msg.reply('This channel is now being tracked starting at **1**!\n*Note that if you want to start at a higher number you\'ll need to **!fetch** then **!initialize** instead.')
+    } else if (command === "untrack") {
+        let count = await checkCounter(msg.guild.id, msg.channel.id);
+        if(!count) return msg.reply('This channel is not being tracked!')
+        //Ask for confirmation
+        msg.channel.send('Are you sure you want to untrack this channel? You will have to start over from 1 or go through the initialization process to track it again! (Y/N)')
+        const collected = await client.channels
+                .get(msg.channel.id)
+                .awaitMessages(
+                  async m => {
+                    if (m.author.bot) return false;
+                    if (!m.author.id === msg.author.id) return false
+                    if (
+                      m.content.toLowerCase() === "y" ||
+                      m.content.toLowerCase() === "n"
+                    ) {
+                      return true;
+                    }
+                  },
+                  {
+                    max: 1,
+                    time: 120000,
+                    errors: ["time"]
+                  }
+                );
+
+              final_answer = collected.array()[0].content;
+              if (final_answer === "y") {
+                const remResult = await remCounter(counters, msg.guild.id, msg.channel.id)
+                msg.channel.send(remResult)
+              } else {
+                msg.channel.send('Untrack cancelled')
+              }
     } else if ( command === "cleanmessages") {
        let result = await cleanMessages(msg.guild.id, msg.channel.id);
         msg.reply(result);
@@ -125,11 +164,52 @@ const handleCommands = async msg => {
       msg.reply(sendMsg);
     });
   } else if (command === "count") {
-    let count = await checkCounter(msg.guild.id, msg.channel.id);
+    const count = await checkCounter(msg.guild.id, msg.channel.id);
+    const lastUsers = await getLastUsers(msg.guild.id, msg.channel.id, config.REPEAT_INTERVAL)
+    let usernames = ''
+    for (let i = 0; i < lastUsers.length; i++) {
+        const user = await client.fetchUser(lastUsers[i].user_id);
+        if (i === 0) {
+            usernames += user.tag
+        } else {
+            usernames += ' or ' + user.tag
+        }
+        
+    }
     if (!count) {
         msg.reply('There is no counting going on in this channel :(')
     } else {
-        msg.reply(`I'm looking for someone to say **${count}**! :)`)
+        msg.reply(`I'm looking for someone to say **${count}**! But it can't be ` + usernames)
+    }
+  } else if (command === "me") {
+    let myStats = new CountStats();
+    await myStats.loadUserMessages(query, msg.guild.id, msg.channel.id, msg.author.id)
+    msg.reply(`you have counted **${myStats.getTotalCounts(msg.author.id)}** times in this channel!`)
+  } else if (command === "stats") {
+    let myStats = new CountStats();
+    await myStats.loadChannelMessages(query, msg.guild.id, msg.channel.id)
+    msg.channel.send(`People have counted **${myStats.getTotalCounts()}** times in this channel!`)
+  } else if (command === "review") {
+    let counter = await checkCounter(msg.guild.id, msg.channel.id);
+    if (!counter) return msg.channel.send('This channel is not being tracked')
+    //Get number argument (try to parse)
+    try {
+        let count = parseInt(args[0])
+        let db_message = await getMessage(msg.guild.id, msg.channel.id, count);
+        if (db_message) {
+            let link = `https://discordapp.com/channels/${
+                db_message.server_id
+              }/${db_message.channel_id}/${
+                db_message.message_id
+              }\n`;
+            let user = await client.fetchUser(db_message.user_id);
+            msg.channel.send(`**Count:** ${db_message.count}\n**Sent At:** ${db_message.timestamp}\n**${user.tag}** said "${db_message.message_content}"\n**Link:** ${link}`)
+            //Add link to this message
+        } else {
+            msg.channel.send('That count was not found in this channel')
+        }
+    } catch(e) {
+        msg.channel.send('**!review** *count* : the count you provided was invalid')
     }
   }
 };
@@ -151,10 +231,9 @@ const initializeCount = async (
       const current_db_message = messages[i];
       if (tryParseAndFindNumber(current_db_message.message_content, count)) {
         //Check if user is the last user who marked a count
-        let previousUsers = await getCountUsers(
+        let previousUsers = await getLastUsers(
           server_id,
           channel_id,
-          count - 1,
           repeatInterval
         );
         let shouldMark = true;
@@ -301,7 +380,13 @@ const getMessages = async (server_id, channel_id) => {
   return;
 };
 
-
+const getMessage = async (server_id, channel_id, count) => {
+    let message = await query(`SELECT * FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count = ${count}`)
+    if (message) {
+        return message[0];
+    }
+    return;
+}
 
 const markMessageCount = async (server_id, channel_id, message_id, count) => {
   console.log(
@@ -321,14 +406,6 @@ const markMessageCount = async (server_id, channel_id, message_id, count) => {
     }
   });
   return;
-};
-
-const getCountUsers = async (server_id, channel_id, count, repeatInterval) => {
-  let results = await query(
-    `SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count <= ${count} AND count > ${count -
-      repeatInterval} AND count > 0`
-  );
-  return results;
 };
 
 const getLastUsers = async (server_id, channel_id, repeatInterval) => {
@@ -496,4 +573,4 @@ const getInitialLog = async channel => {
 //   });
 // };
 
-client.login(keys.TOKEN);
+client.login(process.env.BOT_TOKEN || keys.TOKEN);
