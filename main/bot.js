@@ -755,6 +755,8 @@ const getInitialLog = async channel => {
       if (query_messsage.length === 0) {
         total++;
         await insertMessage(message, -1);
+      } else {
+        ignore++;
       }
       await sleep(100);
     }
