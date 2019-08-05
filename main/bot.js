@@ -685,6 +685,12 @@ const tryParseAndFindNumber = (content, target) => {
   if (targetRegex.test(no_space_content)) {
     return true;
   }
+  
+  let equation = no_space_content.replace("x", "*");
+    if (math.evaluate(equation) === target) {
+      return true;
+    }
+
   //Try evaluating equations in the content to find the target
   let mathRegex = /(\d+[\+\/\*\-x])*(\d+)/g;
   let matches = no_space_content.match(mathRegex);

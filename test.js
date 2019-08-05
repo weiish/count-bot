@@ -52,3 +52,4 @@ const tryParseAndFindNumber = (content, target) => {
 
   console.log(tryParseAndFindNumber('(1234*5678- 5232433)/1000-(285+36.219)', 1453))
   console.log(math.evaluate('(1234*5678- 5232433)/1000-(285+36.219)'))
+  console.log(math.evaluate('((38^2)+(3^2)+1)'))
