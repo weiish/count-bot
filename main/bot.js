@@ -85,10 +85,12 @@ const handleCounters = async msg => {
           channel_id,
           msg.author.id
         );
-        if (userNonCountMessages % 5 === 0) {
-          msg.reply(
-            "This channel is for taking turns counting! You're not counting right!"
-          );
+        if (userNonCountMessages) {
+          if (userNonCountMessages % 5 === 0 && userNonCountMessages > 0) {
+            msg.reply(
+              "This channel is for taking turns counting! You're not counting right!"
+            );
+          }
         }
         return;
       }
@@ -97,8 +99,8 @@ const handleCounters = async msg => {
 
   let msgIsCount = tryParseAndFindNumber(msg.content, count);
   if (msgIsCount) {
-    await updateCounter(server_id, channel_id, ++count);
     await insertMessage(msg, count);
+    await updateCounter(server_id, channel_id, ++count);
     await msg.react("✅");
     await resetUserNonCountMessages(server_id, channel_id, msg.author.id);
   } else {
