@@ -43,7 +43,10 @@ client.on("ready", async () => {
   admins = await loadAdmins();
   counters = await loadCounters();
   client.user.setActivity(`${config.PREFIX}help`);
+  let owner = await client.fetchUser(keys.CREATOR_ID)
+  owner.send('Ready to go!');
   console.log(`Logged in as ${client.user.tag}!`);
+  
 });
 
 client.on("message", msg => {
