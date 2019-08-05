@@ -205,7 +205,7 @@ class CountStats {
       messageArray.push([user_id, categorizedMessages[user_id]])
     }
     messageArray.sort((a,b) => {
-      return a[1] - b[1];
+      return b[1] - a[1];
     })
     return messageArray
   }
