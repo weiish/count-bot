@@ -27,12 +27,19 @@ const tryParseAndFindNumber = (content, target) => {
     }
     console.log(no_space_content)
   
+    let equation = no_space_content.replace("x", "*");
+    if (match.evaluate(equation) === target) {
+      return true;
+    }
+    //Try evaluating the whole message while replacing x with *
+
     //Try evaluating equations in the content to find the target
     let mathRegex = /(\d+[\+\/\*\-x])*(\d+)/g;
     let matches = no_space_content.match(mathRegex);
     if (matches) {
       for (let i = 0; i < matches.length; i++) {
         let match = matches[i].replace("x", "*");
+        console.log(match)
         if (math.evaluate(match) === target) {
           return true;
         }
@@ -43,4 +50,5 @@ const tryParseAndFindNumber = (content, target) => {
     return false;
   };
 
-  console.log(tryParseAndFindNumber('Nein nein nein', 999))
+  console.log(tryParseAndFindNumber('(1234*5678- 5232433)/1000-(285+36.219)', 1453))
+  console.log(math.evaluate('(1234*5678- 5232433)/1000-(285+36.219)'))
