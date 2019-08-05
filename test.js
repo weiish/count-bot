@@ -28,7 +28,7 @@ const tryParseAndFindNumber = (content, target) => {
     console.log(no_space_content)
   
     let equation = no_space_content.replace("x", "*");
-    if (match.evaluate(equation) === target) {
+    if (math.evaluate(equation) === target) {
       return true;
     }
     //Try evaluating the whole message while replacing x with *
