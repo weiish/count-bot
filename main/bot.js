@@ -791,8 +791,7 @@ const getInitialLog = async channel => {
   try {
     await fetchSomeMessages(channel, limit, before);
   } catch (e) {
-    let owner = await client.fetchUser(keys.CREATOR_ID)
-    owner.send(e);
+    console.log(e)
   }
   
 };
