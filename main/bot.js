@@ -69,6 +69,7 @@ const handleCounters = async msg => {
   let previousUsers = await getLastUsers(
     server_id,
     channel_id,
+    count,
     config.REPEAT_INTERVAL
   );
   if (previousUsers) {
@@ -150,12 +151,13 @@ const handleCommands = async msg => {
     } else if (command === "init") {
       //Check if count is already enabled
       let count = await checkCounter(msg.guild.id, msg.channel.id);
-      if (count) return msg.reply("This channel is already being tracked!");
+      if (!count) count = 1; 
       msg.reply("Initializing counts in this channel... I will ask questions if any counts are unsure.");
       await initializeCount(
         msg.guild.id,
         msg.channel.id,
         client,
+        count,
         config.REPEAT_INTERVAL
       );
     } else if (command === "track") {
@@ -170,7 +172,7 @@ const handleCommands = async msg => {
       let count = await checkCounter(msg.guild.id, msg.channel.id);
       if (!count) return msg.reply("This channel is not being tracked!");
       //Ask for confirmation
-      msg.channel.send(
+      await msg.channel.send(
         "Are you sure you want to untrack this channel? You will have to start over from 1 or go through the initialization process to track it again! (Y/N)"
       );
       const collected = await client.channels.get(msg.channel.id).awaitMessages(
@@ -238,6 +240,7 @@ const handleCommands = async msg => {
     const lastUsers = await getLastUsers(
       msg.guild.id,
       msg.channel.id,
+      count,
       config.REPEAT_INTERVAL
     );
     let usernames = "";
@@ -374,7 +377,6 @@ const handleCommands = async msg => {
         month = new Date().getMonth();
         year = new Date().getFullYear();
       }
-      console.log(month, date, year);
       const ranks = await myStats.getRanksByDay(date, month, year);
       if (ranks.length === 0) {
         await msg.channel.send("No counts recorded for the specified date!");
@@ -489,11 +491,11 @@ const initializeCount = async (
   server_id,
   channel_id,
   client,
+  count=1,
   repeatInterval
 ) => {
   let messages = await getMessages(server_id, channel_id);
 
-  let count = 1;
   if (messages.length > 0) {
     let messages_since_last_found = 0;
 
@@ -505,6 +507,7 @@ const initializeCount = async (
         let previousUsers = await getLastUsers(
           server_id,
           channel_id,
+          count,
           repeatInterval
         );
         let shouldMark = true;
@@ -617,7 +620,7 @@ const parseDate = (dateString, monthOrDate) => {
 };
 const getMessages = async (server_id, channel_id) => {
   let messages = await query(
-    `SELECT * FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} ORDER BY timestamp`
+    `SELECT * FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} ORDER BY id DESC`
   );
   if (messages) {
     return messages;
@@ -652,22 +655,24 @@ const markMessageCount = async (server_id, channel_id, message_id, count) => {
   return;
 };
 
-const getLastUsers = async (server_id, channel_id, repeatInterval) => {
+const getLastUsers = async (server_id, channel_id, count, repeatInterval) => {
   let results = await query(
-    `SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count > 0 ORDER BY count DESC LIMIT ${repeatInterval}`
+    `SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count > 0 AND count < ${count} AND count > ${count-repeatInterval-1} ORDER BY count DESC LIMIT ${repeatInterval}`
   );
   return results;
 };
 
 const tryParseAndFindNumber = (content, target) => {
   let no_space_content = content.replace(/\s/g, "");
+  no_space_content = no_space_content.toLowerCase();
 
   //Try converting emojis and keywords to numbers
   const conversion_keys = Object.keys(conversions);
   for (let i = 0; i < conversion_keys.length; i++) {
     if (no_space_content.includes(conversion_keys[i])) {
+      let conversion_regex = new RegExp(conversion_keys[i], "g")
       no_space_content = no_space_content.replace(
-        conversion_keys[i],
+        conversion_regex,
         conversions[conversion_keys[i]]
       );
     }
@@ -678,7 +683,6 @@ const tryParseAndFindNumber = (content, target) => {
   if (targetRegex.test(no_space_content)) {
     return true;
   }
-
   //Try evaluating equations in the content to find the target
   let mathRegex = /(\d+[\+\/\*\-x])*(\d+)/g;
   let matches = no_space_content.match(mathRegex);

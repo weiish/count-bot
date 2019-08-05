@@ -11,5 +11,6 @@ module.exports = {
   "9⃣": 9,
   "0⃣": 0,
   tree: 3,
-  fitty: 50
+  fitty: 50,
+  nein: 9
 };
