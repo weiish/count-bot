@@ -652,7 +652,7 @@ const getInitialLog = async channel => {
           }
           setTimeout(async () => {
             await fetchSomeMessages(channel, limit, newBefore, total+numMessagesFetched, status_msg);
-          }, 2000);
+          }, 5000);
         } else {
           console.log("DONE!");
           channel.send(`Done Fetching ${total + numMessagesFetched} Messages!`);
