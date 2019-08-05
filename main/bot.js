@@ -151,7 +151,7 @@ const handleCommands = async msg => {
       //Check if count is already enabled
       let count = await checkCounter(msg.guild.id, msg.channel.id);
       if (count) return msg.reply("This channel is already being tracked!");
-      msg.reply("Fetching all messages in this channel...");
+      msg.reply("Initializing counts in this channel... I will ask questions if any counts are unsure.");
       await initializeCount(
         msg.guild.id,
         msg.channel.id,
