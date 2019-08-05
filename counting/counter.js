@@ -1,4 +1,4 @@
-const { connection, query } = require("./database/db");
+const { connection, query } = require("../database/db");
 
 const loadCounters = async () => {
   //Load all watching channels into DB

@@ -1,5 +1,5 @@
-const { connection, query } = require("./database/db");
-const keys = require("./config/keys");
+const { connection, query } = require("../database/db");
+const keys = require("../config/keys");
 
 let loadedAdmins = false;
 

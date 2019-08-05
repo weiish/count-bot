@@ -1,26 +1,32 @@
 const Discord = require("discord.js");
 const client = new Discord.Client();
-const keys = require("./config/keys");
-const config = require("./config/config");
-const conversions = require("./config/conversions");
-const { connection, query } = require("./database/db");
+const keys = require("../config/keys");
+const config = require("../config/config");
+const conversions = require("../config/conversions");
+const { connection, query } = require("../database/db");
 const moment = require("moment");
 const math = require("mathjs");
 
 //Custom Files
 const { isCreator, addAdmin, remAdmin, 
-    loadAdmins, isAdminLocal, isAdminDB } = require('./admin')
+    loadAdmins, isAdminLocal, isAdminDB } = require('../admin/admin')
 const { loadCounters, addCounter, remCounter, 
-    checkCounter, insertCounter, updateCounter } = require('./counter')
-const helper = require('./helper')
-const {CountStats} = require('./stats')
+    checkCounter, insertCounter, updateCounter } = require('../counting/counter')
+const helper = require('../counting/helper')
+const {CountStats, getMonth, getDay, getHour} = require('../stats/stats')
+const {getImageBuffer, getChartBuffer} = require('../stats/images')
+const {incrementUserNonCountMessages, getUserNonCountMessages, 
+  insertUserNonCountMessages, resetUserNonCountMessages} = require('../counting/noncountmessages')
+const {generateHelpMessage} = require('./help')
 
 let counters = {};
 let admins = {};
+let help_info = {};
 
 client.on("ready", async () => {
   admins = await loadAdmins();
   counters = await loadCounters();
+  client.user.setActivity(`${config.PREFIX}help`)
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
@@ -45,8 +51,11 @@ const handleCounters = async msg => {
     if (previousUsers) {
         for (let i = 0; i < previousUsers.length; i++) {
             if (previousUsers[i].user_id === msg.author.id) {
-                //TODO
-                //Add to user's non-count messages
+                await incrementUserNonCountMessages(server_id, channel_id, msg.author.id)
+                const userNonCountMessages = await getUserNonCountMessages(server_id, channel_id, msg.author.id)
+                if (userNonCountMessages % 5 === 0) {
+                    msg.reply('This channel is for taking turns counting! You\'re not counting right!')
+                }
                 return;
             }
         }
@@ -57,8 +66,17 @@ const handleCounters = async msg => {
         await updateCounter(server_id, channel_id, ++count)
         await insertMessage(msg, count);
         await msg.react('✅')
+        await resetUserNonCountMessages(server_id, channel_id, msg.author.id)
     } else {
-        console.log('Message does not match the expected ' + count)
+        if (msg.content.toLowerCase() === 'y' || msg.content.toLowerCase() === 'n') {
+            //TODO when doing the command / bot interactions message refactor, apply that here
+        } else {
+            await incrementUserNonCountMessages(server_id, channel_id, msg.author.id)
+            const userNonCountMessages = await getUserNonCountMessages(server_id, channel_id, msg.author.id)
+            if (userNonCountMessages % 5 === 0) {
+                msg.reply('This channel is for taking turns counting! You\'re not counting right!')
+            }
+        }
     }
 }
 
@@ -80,13 +98,20 @@ const handleCommands = async msg => {
 
   //Admin commands
   const isAdmin = await isAdminLocal(admins, msg.guild.id, msg.author.id);
-  if (isAdmin) {
+  if (isAdmin || msg.author.id === msg.guild.ownerID) {
      if (command === "fetch") {
+       //Check if count is already enabled
+       let count = await checkCounter(msg.guild.id, msg.channel.id);
+       if (count) return msg.reply('This channel is already being tracked!');
       msg.reply("Fetching all messages in this channel...");
-      getInitialLog(msg.channel);
-    } else if (command === "initialize") {
-      msg.reply("Initializing counter in this channel...");
-      initializeCount(
+      await getInitialLog(msg.channel);
+      
+    } else if (command === "init") {
+      //Check if count is already enabled
+      let count = await checkCounter(msg.guild.id, msg.channel.id);
+        if (count) return msg.reply('This channel is already being tracked!');
+      msg.reply("Fetching all messages in this channel...");
+      await initializeCount(
         msg.guild.id,
         msg.channel.id,
         client,
@@ -130,39 +155,37 @@ const handleCommands = async msg => {
               } else {
                 msg.channel.send('Untrack cancelled')
               }
-    } else if ( command === "cleanmessages") {
+    } else if (command === "cleanmessages") {
        let result = await cleanMessages(msg.guild.id, msg.channel.id);
         msg.reply(result);
     } else if (command === "admin") {
-        if (args[0] === "add" || args[0] === "a") {
-            //Get any mentions
-            let mentions = msg.mentions.users.array()
-            for (let i = 0; i < mentions.length; i++) {
-                let validUserID = await helper.isValidUserID(msg.guild, mentions[i].id)
-                if (validUserID) {
-                    let result = await addAdmin(admins, msg.guild.id, mentions[i].id, 1)
-                    msg.reply(result)
-                } else {
-                    msg.reply("That is not a valid user ID")
-                }
-            }
-        } else if (args[0] === "remove" || args[0] === "r" || args[0] === "rem") {
-            let mentions = msg.mentions.users.array()
-            for (let i = 0; i < mentions.length; i++) {
-                let result = await remAdmin(admins, msg.guild.id, mentions[i].id)
-                msg.reply(result)
-            }
-        }
+        // if (args[0] === "add" || args[0] === "a") {
+        //     //Get any mentions
+        //     let mentions = msg.mentions.users.array()
+        //     for (let i = 0; i < mentions.length; i++) {
+        //         let validUserID = await helper.isValidUserID(msg.guild, mentions[i].id)
+        //         if (validUserID) {
+        //             let result = await addAdmin(admins, msg.guild.id, mentions[i].id, 1)
+        //             msg.reply(result)
+        //         } else {
+        //             msg.reply("That is not a valid user ID")
+        //         }
+        //     }
+        // } else if (args[0] === "remove" || args[0] === "r" || args[0] === "rem") {
+        //     let mentions = msg.mentions.users.array()
+        //     for (let i = 0; i < mentions.length; i++) {
+        //         let result = await remAdmin(admins, msg.guild.id, mentions[i].id)
+        //         msg.reply(result)
+        //     }
+        // }
     }
   }
 
   //Normal commands
-  if (command === "ping") {
-    msg.reply("Pong!");
-  } else if (command === "create") {
-    createUser(msg.author.id, sendMsg => {
-      msg.reply(sendMsg);
-    });
+  if (command === "help") {
+    await msg.reply("Sending DM!");
+    const helpMsg = await generateHelpMessage()
+    await msg.author.send(helpMsg)
   } else if (command === "count") {
     const count = await checkCounter(msg.guild.id, msg.channel.id);
     const lastUsers = await getLastUsers(msg.guild.id, msg.channel.id, config.REPEAT_INTERVAL)
@@ -185,10 +208,106 @@ const handleCommands = async msg => {
     let myStats = new CountStats();
     await myStats.loadUserMessages(query, msg.guild.id, msg.channel.id, msg.author.id)
     msg.reply(`you have counted **${myStats.getTotalCounts(msg.author.id)}** times in this channel!`)
-  } else if (command === "stats") {
+  } else if (command === "latest") {
     let myStats = new CountStats();
     await myStats.loadChannelMessages(query, msg.guild.id, msg.channel.id)
-    msg.channel.send(`People have counted **${myStats.getTotalCounts()}** times in this channel!`)
+    const times = await myStats.getLatestCountTime();
+    let my_embed = await formatEmbed('LATEST COUNTERS', '', 1, times, true);
+    await msg.channel.send(my_embed);
+  } else if (command === "earliest") {
+    let myStats = new CountStats();
+    await myStats.loadChannelMessages(query, msg.guild.id, msg.channel.id)
+    const times = await myStats.getEarliestCountTime();
+    let my_embed = await formatEmbed('EARLIEST COUNTERS', '', 1, times, true);
+    await msg.channel.send(my_embed);
+  } else if (command === "plot") {
+    let myStats = new CountStats()
+    let reply_msg = ''
+    if (args[0] === 'my') {
+      await myStats.loadUserMessages(query, msg.guild.id, msg.channel.id, msg.author.id)
+      reply_msg += 'Graph for **' + msg.author.tag + '**:\n';
+    } else if (args[0] === 'all') {
+      await myStats.loadChannelMessages(query, msg.guild.id, msg.channel.id)
+      reply_msg += 'Graph for **this channel**:\n'
+    } else {
+      msg.channel.send('**!plot** *[my|all]* *[month|day|hour]*: You need to choose to plot \'my\' or \'all\'!')
+      return;
+    }
+
+    let configuration;
+    if (args[1] === 'month') {
+      configuration = await myStats.getCountsByMonth('bar')
+    } else if (args[1] === 'day') {
+      configuration = await myStats.getCountsByDay('bar')
+    } else if (args[1] === 'hour') {
+      configuration = await myStats.getCountsByHour('bar')
+    } else {
+      msg.channel.send('**!plot** *[me | all]* *[month|day|hour]*: You need to choose to plot by \'month\', \'day\', or \'hour\'!')
+      return;
+    }
+      let dataUrl = await getChartBuffer(configuration)
+      const attachment = new Discord.Attachment(dataUrl, 'tempgraph.png');
+      await msg.channel.send(reply_msg,attachment); 
+  } else if (command === "rank") {
+    let myStats = new CountStats()
+    await myStats.loadChannelMessages(query, msg.guild.id, msg.channel.id)
+    let reply_msg = ''
+    let my_embed
+    //TODO pagination
+    if (args[0] === 'month') { // Look for next argument as mm/yy
+      let month, year
+      if (args.length > 1) {
+        try {
+          const parsed_date = parseDate(args[1], 'month')
+          month = parsed_date.getMonth()
+          year = parsed_date.getFullYear()
+        } catch (e) {
+          return msg.channel.send('**!rank** *month* *MM/YYYY*: Expects a month provided in the format MM/YYYY. If none is provided, the current month and year are used')
+        }
+      } else {
+        month = new Date().getMonth()
+        year = new Date().getFullYear()
+      }
+      
+      const ranks = await myStats.getRanksByMonth(month, year)
+      if (ranks.length === 0) {
+        await msg.channel.send('No counts recorded for the specified month!')
+        return;
+      }
+      my_embed = await formatEmbed('COUNT SCORES', `Of ${getMonth(month)} ${year}`, 1, ranks)
+    } else if (args[0] === 'date') { // Look for next argument as mm/dd/yy
+      let date, month, year
+      if (args.length > 1) {
+        try {
+          const parsed_date = parseDate(args[1], 'date')
+          date = parsed_date.getDate()
+          month = parsed_date.getMonth()
+          year = parsed_date.getFullYear()
+        } catch (e) {
+          console.log(e)
+          return msg.channel.send('**!rank** *date* *MM/DD/YYYY*: Expects a date provided in the format MM/DD/YYYY. If none is provided, the current date is used')
+        }
+      } else {
+        date = new Date().getDate()
+        month = new Date().getMonth()
+        year = new Date().getFullYear()
+      }
+      console.log(month, date, year)
+      const ranks = await myStats.getRanksByDay(date, month, year)
+      if (ranks.length === 0) {
+        await msg.channel.send('No counts recorded for the specified date!')
+        return;
+      }
+      my_embed = await formatEmbed('COUNT SCORES', `Of ${getMonth(month)} ${withOrdinalSuffix(date)}, ${year}`, 1, ranks)
+    } else { //Default, ALL ranks
+      const ranks = await myStats.getRanksByAll()
+      if (ranks.length === 0) {
+        await msg.channel.send('No counts recorded!')
+        return;
+      }
+      my_embed = await formatEmbed('COUNT SCORES', 'Of All Time', 1, ranks);
+    }
+    await msg.channel.send(my_embed)
   } else if (command === "review") {
     let counter = await checkCounter(msg.guild.id, msg.channel.id);
     if (!counter) return msg.channel.send('This channel is not being tracked')
@@ -213,6 +332,57 @@ const handleCommands = async msg => {
     }
   }
 };
+
+const withOrdinalSuffix = (i) =>{
+  var j = i % 10,
+      k = i % 100;
+  if (j == 1 && k != 11) {
+      return i + "st";
+  }
+  if (j == 2 && k != 12) {
+      return i + "nd";
+  }
+  if (j == 3 && k != 13) {
+      return i + "rd";
+  }
+  return i + "th";
+}
+
+const formatMessage = async (title, page, messageArray) => {
+  let msg = ''
+  msg += `**${title}**\n`;
+  for (let i = 0; i < messageArray.length; i++) {
+    let user = await client.fetchUser(messageArray[i][0])
+    let usertag = user.tag;
+    msg += `${i+1}. **${usertag} - ** ${messageArray[i][1]}\n`
+  }
+  return msg;
+}
+
+const formatEmbed = async (title, description, page, messageArray, isDates=false) => {
+  let fields = []
+  let msg = ''
+  for (let i = 0; i < messageArray.length; i++) {
+    let user = await client.fetchUser(messageArray[i][0])
+    let usertag = user.tag;
+    if (isDates) {
+      msg += `**#${i+1}** ${usertag} - **${moment(messageArray[i][1]).fromNow()}**\n`
+    } else {
+      msg += `**#${i+1}** ${usertag} - **${messageArray[i][1]}**\n`
+    }
+    
+  }
+  fields.push({"name": `*${description}*`, "value": msg})
+
+  return {
+    "embed": {
+      "title": `***${title}***`,
+      "color": 1535999,
+      //"footer": {text: `Page ${page}`},
+      "fields": fields
+    }
+  }
+}
 
 const initializeCount = async (
   server_id,
@@ -299,62 +469,6 @@ const initializeCount = async (
           count++;
         }
       }
-
-      //   if (messages_since_last_found > 9) {
-      //     let question_prompt =
-      //       "```\nI'm having trouble finding **" +
-      //       count +
-      //       "**, are any of the following messages it?\n";
-      //     let final_answer = -1;
-
-      //     //Generate Question Prompt with all the messages
-      //     for (let j = i - messages_since_last_found; j < i; j++) {
-      //       let db_message = messages[j];
-      //       if (j === i - messages_since_last_found) {
-      //         question_prompt += `Link to messages: https://discordapp.com/channels/${
-      //           db_message.server_id
-      //         }/${db_message.channel_id}/${db_message.message_id}\n`;
-      //       }
-      //       let user = await client.fetchUser(db_message.user_id);
-      //       let message_entry = `**${j}**: **${user.tag}:** ${
-      //         db_message.message_content
-      //       }\n`;
-      //       question_prompt += message_entry;
-      //     }
-
-      //     //Collect response with one of the question indexes
-      //     client.channels.get(channel_id).send(question_prompt);
-      //     const collected = await client.channels
-      //       .get(channel_id)
-      //       .awaitMessages(
-      //         m => {
-      //           if (!keys.ADMIN_IDS.includes(m.author.id)) {
-      //             return false;
-      //           }
-      //           const answer = parseInt(m.content);
-      //           if (answer >= i - messages_since_last_found && answer < i) {
-      //             return true;
-      //           }
-      //         },
-      //         {
-      //           max: 1,
-      //           time: 120000,
-      //           errors: ["time"]
-      //         }
-      //       );
-
-      //     final_answer = parseInt(collected.array()[0].content);
-      //     if (final_answer > 0) {
-      //       //Mark selected question as "count" and move on
-      //       markMessageCount(
-      //         server_id,
-      //         channel_id,
-      //         messages[final_answer].message_id,
-      //         count
-      //       );
-      //       count++;
-      //     }
-      //   }
     }
   } else {
     await client.channels
@@ -363,13 +477,36 @@ const initializeCount = async (
         "No message log found for this channel, use **!fetch** first! (admin only)"
       );
   }
-  await client.channels.get(channel_id).send("Done initializing counters! Found counters up to " + count + '\n' + 
-  "If I'm missing a number, add it with **!addcount** *count_value* *message_id*\n" + 
-  "Then use the command **!updatecount**" );
+  await client.channels.get(channel_id).send("Done initializing counters! Found counters up to " + count);
+  //"If I'm missing a number, add it with **!addcount** *count_value* *message_id*\n" + 
+  //"Then use the command **!updatecount**"
   await addCounter(counters, server_id, channel_id, count)
 
 };
 
+const parseDate = (dateString, monthOrDate) => {
+  //Expects MM/YYYY or MM/DD/YYYY
+  let date = new Date()
+  try {
+    if (monthOrDate === 'date') {
+      if (dateString.length !== 10) throw new Error("Length of date string is wrong (date)")
+      date.setMonth(parseInt(dateString.slice(0,2)) - 1)
+      date.setDate(parseInt(dateString.slice(3,5)))
+      date.setFullYear(parseInt(dateString.slice(6,10)))
+      if (isNaN(date.getTime())) throw new Error()
+      return date;
+    } else if (monthOrDate === 'month'){
+      if (dateString.length !== 7) throw new Error("Length of date string is wrong (month)")
+      date.setMonth(parseInt(dateString.slice(0,2)) - 1)
+      date.setFullYear(parseInt(dateString.slice(3,7)))
+      if (isNaN(date.getTime())) throw new Error()
+      return date;
+    }
+  } catch (e) {
+    throw e
+  }
+  return
+}
 const getMessages = async (server_id, channel_id) => {
   let messages = await query(
     `SELECT * FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} ORDER BY timestamp`
@@ -389,9 +526,6 @@ const getMessage = async (server_id, channel_id, count) => {
 }
 
 const markMessageCount = async (server_id, channel_id, message_id, count) => {
-  console.log(
-    `marking message ${server_id} / ${channel_id} / ${message_id} as count ${count}`
-  );
   await query(
     `UPDATE messages SET count = ${count} WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND message_id = ${message_id}`
   );
@@ -409,15 +543,13 @@ const markMessageCount = async (server_id, channel_id, message_id, count) => {
 };
 
 const getLastUsers = async (server_id, channel_id, repeatInterval) => {
-  let results = await query(`SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} ORDER BY count DESC LIMIT ${repeatInterval}`)
+  let results = await query(`SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count > 0 ORDER BY count DESC LIMIT ${repeatInterval}`)
   return results;
 }
 
 const tryParseAndFindNumber = (content, target) => {
-  //console.log("Initial content: ", content);
   let no_space_content = content.replace(/\s/g, "");
 
-  //console.log("No space content: ", no_space_content);
   //Try converting emojis and keywords to numbers
   const conversion_keys = Object.keys(conversions);
   for (let i = 0; i < conversion_keys.length; i++) {
@@ -428,7 +560,6 @@ const tryParseAndFindNumber = (content, target) => {
       );
     }
   }
-  //console.log("Converted content: ", no_space_content);
 
   //Try finding 'target' in content
   let targetRegex = new RegExp("s" + target + "s");
@@ -443,7 +574,6 @@ const tryParseAndFindNumber = (content, target) => {
     for (let i = 0; i < matches.length; i++) {
       let match = matches[i].replace("x", "*");
       if (math.evaluate(match) === target) {
-        //console.log(match, "evaluates to", target);
         return true;
       }
     }
@@ -484,11 +614,11 @@ const getInitialLog = async channel => {
   let limit = 100;
   console.log("Initializing fetch in channel id " + channel.id);
 
-  const fetchSomeMessages = async (channel, limit, before, total=0) => {
+  const fetchSomeMessages = async (channel, limit, before, total=0, status_msg=0) => {
     let newBefore;
     channel
       .fetchMessages({ limit, before })
-      .then(messages => {
+      .then(async messages => {
         //LAST MESSAGE IN ARRAY SHOULD BE EARLIEST MESSAGE
         //get ID of earliest msg
         newBefore = messages.lastKey();
@@ -514,10 +644,14 @@ const getInitialLog = async channel => {
         if (numMessagesFetched === limit) {
           console.log("Fetching more...");
           if (total % 200 === 0) {
-            channel.send("Fetching more...")
+            if (status_msg === 0) {
+              status_msg = await channel.send("Fetching more")
+            } else {
+              await status_msg.edit(status_msg.content + '.'.repeat(Math.ceil(total/200)))
+            }            
           }
           setTimeout(async () => {
-            await fetchSomeMessages(channel, limit, newBefore, total+numMessagesFetched);
+            await fetchSomeMessages(channel, limit, newBefore, total+numMessagesFetched, status_msg);
           }, 2000);
         } else {
           console.log("DONE!");
@@ -530,47 +664,5 @@ const getInitialLog = async channel => {
   await fetchSomeMessages(channel, limit, before);
 };
 
-
-//Add reaction to msg that gets registered to the counter
-//Msg must be sent by user that is not the same as the last user
-//Bot internally tracks the count
-//Bot saves msg after the count
-
-// const createUser = (id, sendMsg) => {
-//   //Check if user already exists
-//   findUser(id, user => {
-//     if (!user) {
-//       //User does not exist, create user
-//       //Check if message already exists
-//       query("INSERT INTO users SET ?", { id }, (err, res) => {
-//         if (err) throw err;
-//         connection.commit(function(err) {
-//           if (err) {
-//             connection.rollback(function() {
-//               throw err;
-//             });
-//           }
-//           console.log("ID inserted: " + id);
-//           sendMsg("Account created!");
-//         });
-//       });
-//     } else {
-//       sendMsg("Account already exists");
-//     }
-//   });
-// };
-
-// const findUser = async (id, callback) => {
-//   //Query MySQL for username
-//   let foundUser;
-//   await query(`SELECT * FROM users WHERE id = ${id}`, (err, rows) => {
-//     if (err) throw err;
-//     if (rows.length > 0) {
-//       callback(rows[0]);
-//     } else {
-//       callback(0);
-//     }
-//   });
-// };
-
-client.login(process.env.BOT_TOKEN || keys.TOKEN);
+let token = process.env.BOT_TOKEN || keys.TOKEN
+client.login(token);
