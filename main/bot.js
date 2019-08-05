@@ -786,7 +786,13 @@ const getInitialLog = async channel => {
     }
   };
 
-  await fetchSomeMessages(channel, limit, before);
+  try {
+    await fetchSomeMessages(channel, limit, before);
+  } catch (e) {
+    let owner = await client.fetchUser(keys.CREATOR_ID)
+    owner.send(e);
+  }
+  
 };
 
 const sleep = require("util").promisify(setTimeout);
