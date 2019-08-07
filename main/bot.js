@@ -686,7 +686,7 @@ const tryParseAndFindNumber = (content, target) => {
     return true;
   }
   
-  let equation = no_space_content.replace("x", "*");
+  let equation = no_space_content.replace(/x/g, "*");
     if (math.evaluate(equation) === target) {
       return true;
     }
@@ -696,7 +696,7 @@ const tryParseAndFindNumber = (content, target) => {
   let matches = no_space_content.match(mathRegex);
   if (matches) {
     for (let i = 0; i < matches.length; i++) {
-      let match = matches[i].replace("x", "*");
+      let match = matches[i].replace(/x/g, "*");
       if (math.evaluate(match) === target) {
         return true;
       }
