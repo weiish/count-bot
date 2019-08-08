@@ -317,7 +317,7 @@ const handleCommands = async msg => {
       configuration = await myStats.getCountsByHour("bar");
     } else {
       msg.channel.send(
-        "**!plot** *[me | all]* *[month|day|hour]*: You need to choose to plot by 'month', 'day', or 'hour'!"
+        "**!plot** *[my|all]* *[month|day|hour]*: You need to choose to plot by 'month', 'day', or 'hour'!"
       );
       return;
     }
