@@ -55,7 +55,7 @@ client.on("messageUpdate", async (oldMsg, newMsg) => {
   //Check if old message was sent after the most recent count in the channel
   const lastCountTimestamp = await getCounterTimestamp(oldMsg.guild.id, oldMsg.channel.id);
   if (lastCountTimestamp) {
-      if (lastCountTimestamp > oldMsg.createdAt) {
+      if (lastCountTimestamp < oldMsg.createdAt) {
         handleCounters(newMsg)
       }
   }
@@ -701,11 +701,15 @@ const tryParseAndFindNumber = (content, target) => {
     return true;
   }
   
-  let equation = no_space_content.replace(/x/g, "*");
+  try {
+    let equation = no_space_content.replace(/x/g, "*");
     if (math.evaluate(equation) === target) {
       return true;
     }
-
+  } catch (e) {
+    
+  }
+  
   //Try evaluating equations in the content to find the target
   let mathRegex = /(\d+[\+\/\*\-x\^])*(\d+)/g;
   let matches = no_space_content.match(mathRegex);
