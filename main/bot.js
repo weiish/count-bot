@@ -22,7 +22,8 @@ const {
   remCounter,
   checkCounter,
   insertCounter,
-  updateCounter
+  updateCounter,
+  getCounterTimestamp
 } = require("../counting/counter");
 const helper = require("../counting/helper");
 const { CountStats, getMonth, getDay, getHour } = require("../stats/stats");
@@ -48,6 +49,20 @@ client.on("ready", async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   
 });
+
+client.on("messageUpdate", async (oldMsg, newMsg) => {
+  if (oldMsg.author.bot) return;
+  //Check if old message was sent after the most recent count in the channel
+  const lastCountTimestamp = await getCounterTimestamp(oldMsg.guild.id, oldMsg.channel.id);
+  if (lastCountTimestamp) {
+      if (lastCountTimestamp > oldMsg.createdAt) {
+        handleCounters(newMsg)
+      }
+  }
+
+  //If so, use handleCounters on the newMsg
+
+})
 
 client.on("message", msg => {
   if (msg.author.bot) return;
