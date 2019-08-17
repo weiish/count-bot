@@ -57,6 +57,8 @@ client.on("messageUpdate", async (oldMsg, newMsg) => {
   if (lastCountTimestamp) {
       if (lastCountTimestamp < oldMsg.createdAt) {
         handleCounters(newMsg)
+      } else if (lastCountTimestamp === oldMsg.createdAt) {
+        await newMsg.react("❌");
       }
   }
 
