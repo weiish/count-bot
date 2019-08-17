@@ -126,7 +126,7 @@ class CountStats {
   }
 
   getLatestCountTime() {
-    if (!this.loaded) throw new Error('getRanksByDay was called before loading');
+    if (!this.loaded) throw new Error('getLatestCountTime was called before loading');
     let latestTimes = []
     let user_id_list = []
     if (this.type === 'user') {
@@ -141,14 +141,14 @@ class CountStats {
       }
     }
     latestTimes.sort((a,b) => {
-      return a[1] > b[1];
+      return a[1] < b[1];
     })
 
     return latestTimes;
   }
 
   getEarliestCountTime() {
-    if (!this.loaded) throw new Error('getRanksByDay was called before loading');
+    if (!this.loaded) throw new Error('getEarliestCountTime was called before loading');
     let earliestTimes = []
     let user_id_list = []
     if (this.type === 'user') {
@@ -163,7 +163,7 @@ class CountStats {
       }
     }
     earliestTimes.sort((a,b) =>{
-      return a[1] < b[1];
+      return a[1] > b[1];
     })
     return earliestTimes;
     
