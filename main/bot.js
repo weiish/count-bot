@@ -131,6 +131,9 @@ const handleCounters = async msg => {
         channel_id,
         msg.author.id
       );
+      if (userNonCountMessages) {
+        await msg.react("❌");
+      }
       if (userNonCountMessages % 5 === 0) {
         msg.reply(
           "This channel is for taking turns counting! You're not counting right!"
