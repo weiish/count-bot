@@ -63,13 +63,12 @@ const checkCounter = async (server_id, channel_id) => {
   return;
 };
 
-const getCounterTimestamp = async (server_id, channel_id) => {
-  //Returns the timestamp of the last message that counted in the server/channel
+const getCounter = async (server_id, channel_id) => {
   let results = await query(
-    `SELECT timestamp FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count > 0 ORDER BY count DESC LIMIT 1`
+    `SELECT * FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count > 0 ORDER BY count DESC LIMIT 1`
   )
   if (results.length > 0) {
-    return results[0].timestamp
+    return results[0]
   }
   return;
 }
@@ -93,7 +92,7 @@ module.exports = {
   addCounter,
   remCounter,
   checkCounter,
+  getCounter,
   insertCounter,
-  updateCounter,
-  getCounterTimestamp
+  updateCounter
 };
