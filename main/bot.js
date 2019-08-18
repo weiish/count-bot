@@ -59,6 +59,9 @@ client.on("messageUpdate", async (oldMsg, newMsg) => {
         handleCounters(newMsg)
       } else if (lastCount.message_id === oldMsg.id) {
         await newMsg.react("❌");
+        await newMsg.channel.send(
+          `The last count message was edited. For clarification, the next count is ${lastCount.count+1}`
+        );
       }
   }
 
