@@ -117,9 +117,9 @@ const handleCounters = async msg => {
   // Check if the current message is the current count
   let msgIsCount = tryParseAndFindNumber(msg.content, count);
   if (msgIsCount) {
+    await msg.clearReactions();
     await insertMessage(msg, count);
     await updateCounter(server_id, channel_id, ++count);
-    await msg.clearReactions();
     await msg.react("✅");
     await resetUserNonCountMessages(server_id, channel_id, msg.author.id);
   } else {
