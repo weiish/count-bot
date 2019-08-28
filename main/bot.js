@@ -64,9 +64,6 @@ client.on("messageUpdate", async (oldMsg, newMsg) => {
         );
       }
   }
-
-  //If so, use handleCounters on the newMsg
-
 })
 
 client.on("message", msg => {
@@ -117,10 +114,12 @@ const handleCounters = async msg => {
     }
   }
 
+  // Check if the current message is the current count
   let msgIsCount = tryParseAndFindNumber(msg.content, count);
   if (msgIsCount) {
     await insertMessage(msg, count);
     await updateCounter(server_id, channel_id, ++count);
+    await msg.clearReactions();
     await msg.react("✅");
     await resetUserNonCountMessages(server_id, channel_id, msg.author.id);
   } else {
@@ -643,6 +642,8 @@ const parseDate = (dateString, monthOrDate) => {
   }
   return;
 };
+
+
 const getMessages = async (server_id, channel_id) => {
   let messages = await query(
     `SELECT * FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} ORDER BY id DESC`
