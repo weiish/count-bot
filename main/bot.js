@@ -55,7 +55,7 @@ client.on("messageUpdate", async (oldMsg, newMsg) => {
   //Check if old message was sent after the most recent count in the channel
   const lastCount = await getCounter(oldMsg.guild.id, oldMsg.channel.id);
   if (lastCount) {
-      if (lastCount.timeStamp < oldMsg.createdAt) {
+      if (lastCount.timestamp < oldMsg.createdAt) {
         handleCounters(newMsg)
       } else if (lastCount.message_id === oldMsg.id) {
         await newMsg.react("❌");
