@@ -487,15 +487,21 @@ const formatEmbed = async (
 ) => {
   let fields = [];
   let msg = "";
+  let msgTemp = "";
   for (let i = 0; i < messageArray.length; i++) {
     let user = await client.fetchUser(messageArray[i][0]);
     let usertag = user.tag;
     if (isDates) {
-      msg += `**#${i + 1}** ${usertag} - **${moment(
+      msgTemp += `**#${i + 1}** ${usertag} - **${moment(
         messageArray[i][1]
       ).fromNow()}**\n`;
     } else {
-      msg += `**#${i + 1}** ${usertag} - **${messageArray[i][1]}**\n`;
+      msgTemp += `**#${i + 1}** ${usertag} - **${messageArray[i][1]}**\n`;
+    }
+    if (msgTemp.length < 1000) {
+      msg = msgTemp;
+    } else {
+      break;
     }
   }
   fields.push({ name: `*${description}*`, value: msg });
