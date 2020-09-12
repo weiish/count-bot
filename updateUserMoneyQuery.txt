@@ -1,0 +1,1 @@
+insert into money (user_id, money) select user_id, count(*) from messages where count > 0 group by user_id;

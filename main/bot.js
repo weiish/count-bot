@@ -3,6 +3,7 @@ const client = new Discord.Client();
 const keys = require("../config/keys");
 const config = require("../config/config");
 const conversions = require("../config/conversions");
+const diceodds = require("../config/diceodds");
 const { connection, query } = require("../database/db");
 const moment = require("moment");
 const math = require("mathjs");
@@ -35,6 +36,14 @@ const {
   resetUserNonCountMessages
 } = require("../counting/noncountmessages");
 const { generateHelpMessage } = require("./help");
+const {
+  getMoney,
+  addMoney,
+  insertMoney
+} = require("../gambling/money");
+const {
+  logGamble
+} = require("../gambling/gambles")
 
 let counters = {};
 let admins = {};
@@ -121,6 +130,7 @@ const handleCounters = async msg => {
     await updateCounter(server_id, channel_id, ++count);
     await msg.react("✅");
     await resetUserNonCountMessages(server_id, channel_id, msg.author.id);
+    await addMoney(msg.author.id, 1);
   } else {
     if (
       msg.content.toLowerCase() === "y" ||
@@ -449,8 +459,121 @@ const handleCommands = async msg => {
         "**!review** *count* : the count you provided was invalid"
       );
     }
+  } else if (command === "money" || command === "m") {
+    let money = await getMoney(msg.author.id)
+    msg.reply(
+      `you have $**${money}**`
+    );
+  } else if (command === "flip") {            
+    if (args.length < 2) {
+      return msg.channel.send(
+        "**!flip** *[heads/tails]* *[bet]*: Expects heads or tails as the first argument and a positive integer value for the bet"
+      );
+    }
+
+    let guess = args[0].toLowerCase();
+    let win = false;
+    //Verify user inputted heads or tails
+    if (guess !== "heads" && guess !== "tails") {  
+      return msg.channel.send(
+        "**!flip** *[heads|tails]* *[bet]*: Expects heads or tails as the first argument"
+      );
+    }
+
+    //Parse amount to bet
+    let amount;
+    try {
+      amount = parseInt(args[1], 10);
+      if (amount <= 0) throw new Error("Invalid bet");
+      const player_money = await getMoney(msg.author.id);
+      if (amount > player_money) return msg.reply("You don't have enough money :(");
+    } catch (e) {
+      return msg.channel.send(
+        "**!flip** *[heads|tails]* *[bet]*: Expects a positive integer value for the bet"
+      );
+    }
+
+    //Simulate coinflip
+    let result_text = "";
+    let result = Math.random();
+    if (result >= 0.5) {
+      result_text += "**HEADS!**";
+      if (guess === "heads") win = true;      
+    } else {
+      result_text += "**TAILS!**";
+      if (guess === "tails") win = true;
+    }            
+
+    if (win) {
+      result_text += ` you win $**${amount}**!`
+      await addMoney(msg.author.id, amount)
+    } else {
+      result_text += ` you lost $**${amount}**!`
+      await addMoney(msg.author.id, -amount)
+    }
+    msg.reply(result_text);
+    await logGamble(msg.author.id, amount, "flip", win ? 1 : 0, (guess === "heads") ? 1 : 0);
+
+  } else if (command === "dice") {
+    
+    if (args.length < 2) {
+      return msg.channel.send(
+        "**!dice** *[2-12]* *[bet]*: Expects an integer between 2 and 12 as the first argument and a positive integer value for the bet"
+      );
+    }
+
+    let guess;
+    //Verify user inputted an integer between 2 and 12
+    try {
+      guess = parseInt(args[0], 10);
+      if (guess < 2 || guess > 12) throw new Error("Invalid guess")
+    } catch (e) {
+      return msg.channel.send(
+        "**!dice** *[2-12]* *[bet]*: Expects an integer between 2 and 12 inclusive as the first argument"
+      );
+    }
+
+    //Parse amount to bet
+    let amount;
+    try {
+      amount = parseInt(args[1], 10);
+      if (amount <= 0) throw new Error("Invalid bet");
+      const player_money = await getMoney(msg.author.id);
+      if (amount > player_money) return msg.reply("You don't have enough money :(");
+    } catch (e) {
+      return msg.channel.send(
+        "**!dice** *[2-12]* *[bet]*: Expects a positive integer value for the bet"
+      );
+    }
+
+    //Simulate dice roll
+    let result_text = "";
+    let roll1 = rollDice(6);
+    let roll2 = rollDice(6);
+    let payout_multiplier = 36 / diceodds[guess];    
+    let win = (roll1 + roll2 === guess);
+    
+    result_text += `Rolled **${roll1}** and **${roll2}** for a total of **${roll1 + roll2}**!`;
+
+    if (win) {
+      result_text += ` you win $**${Math.ceil(amount * payout_multiplier - amount)}**!`
+      await addMoney(msg.author.id, Math.ceil(amount * payout_multiplier - amount))
+    } else {
+      result_text += ` you lost $**${amount}**!`
+      await addMoney(msg.author.id, -amount)
+    }
+
+    result_text += ` Your odds were ${diceodds[guess]} / 36`
+    msg.reply(result_text);
+    await logGamble(msg.author.id, amount, "dice", win ? 1 : 0, guess);
+  } else if (command === "highlow" || commands === "hl") {
+    
   }
 };
+
+const rollDice = (max) => {
+  return 1 + Math.floor(Math.random() * max);
+}
 
 const withOrdinalSuffix = i => {
   var j = i % 10,
