@@ -75,7 +75,7 @@ client.on("messageUpdate", async (oldMsg, newMsg) => {
   }
 })
 
-client.on("message", msg => {
+client.on("message", async msg => {
   if (msg.author.bot) return;
   await handleCounters(msg);
   await handleCommands(msg);
@@ -566,8 +566,6 @@ const handleCommands = async msg => {
     result_text += ` Your odds were ${diceodds[guess]} / 36`
     msg.reply(result_text);
     await logGamble(msg.author.id, amount, "dice", win ? 1 : 0, guess);
-  } else if (command === "highlow" || commands === "hl") {
-    
   }
 };
 
