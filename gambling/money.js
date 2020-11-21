@@ -9,24 +9,24 @@ const getMoney = async(user_id) => {
     }
 }
 
-const addMoney = async(user_id, amount = 0) => {
-    const money = await getMoney(user_id)
-    if (money) {
+const addMoney = async(user_id, money = 0) => {
+    const currentMoney = await getMoney(user_id)
+    if (currentMoney) {
         try {
-            await query(`UPDATE money SET money = money + ${amount} WHERE user_id = ${user_id}`)            
+            await query(`UPDATE money SET money = money + ${money} WHERE user_id = ${user_id}`)            
             return true
         } catch (e) {
             return false
         }
     } else {
-        const result = await insertMoney(user_id, amount)
+        const result = await insertMoney(user_id, money)
         return result        
     }    
 }
 
-const insertMoney = async(user_id, amount = 0) => {
+const insertMoney = async(user_id, money = 0) => {
     try {
-        await query(`INSERT INTO money SET ?`, {user_id, amount})
+        await query(`INSERT INTO money SET ?`, {user_id, money})
         return true
     } catch(e) {
         console.log(e)
