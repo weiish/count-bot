@@ -65,7 +65,7 @@ client.on("messageUpdate", async (oldMsg, newMsg) => {
   const lastCount = await getCounter(oldMsg.guild.id, oldMsg.channel.id);
   if (lastCount) {
       if (lastCount.timestamp < oldMsg.createdAt) {
-        handleCounters(newMsg)
+        await handleCounters(newMsg)
       } else if (lastCount.message_id === oldMsg.id) {
         await newMsg.react("❌");
         await newMsg.channel.send(
@@ -77,8 +77,8 @@ client.on("messageUpdate", async (oldMsg, newMsg) => {
 
 client.on("message", msg => {
   if (msg.author.bot) return;
-  handleCounters(msg);
-  handleCommands(msg);
+  await handleCounters(msg);
+  await handleCommands(msg);
 });
 
 const handleCounters = async msg => {
