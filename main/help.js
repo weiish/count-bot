@@ -14,9 +14,9 @@ const generateHelpMessage = async () => {
         ['plot [my|all] [month|day|hour]', 'Plots a graph of (your or the whole server\'s) counts grouped by month, day of the week, or hour of the day'],
         ['rank [month|date|all(default)] [MM/YYYY|MM/DD/YYYY]', 'Gets a list of rankings of all time by default, or with arguments you can rankings of specific months or dates'],
         ['review [count_number]', 'Outputs details of the message that was sent for a specified count'],
-        //['money', 'Shows how much money you have (Count to get more)'],
-        //['flip [heads|tails] [bet]', 'Bet money on a coin flip'],
-        //['dice [2-12] [bet]', 'Bet money on a double dice roll, payout multiplier is the inverse of the odds'],
+        ['money', 'Shows how much money you have (Count to get more)'],
+        ['flip [heads|tails] [bet]', 'Bet money on a coin flip'],
+        ['dice [2-12] [bet]', 'Bet money on a double dice roll, payout multiplier is the inverse of the odds'],
     ]
     const adminDiv = {"name": '**-----Admin Commands-----**', "value": "Commands available only to the owner of the server"}
     const adminCommands = [
