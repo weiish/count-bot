@@ -11,7 +11,7 @@ const getMoney = async(user_id) => {
 
 const addMoney = async(user_id, money = 0) => {
     const currentMoney = await getMoney(user_id)
-    if (currentMoney) {
+    if (currentMoney || currentMoney === 0) {
         try {
             await query(`UPDATE money SET money = money + ${money} WHERE user_id = ${user_id}`)            
             return true
