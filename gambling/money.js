@@ -5,7 +5,7 @@ const getMoney = async(user_id) => {
     if (result.length > 0) {
         return result[0].money
     } else {
-        return
+        return 0;
     }
 }
 
