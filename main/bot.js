@@ -483,8 +483,8 @@ const handleCommands = async msg => {
     //Parse amount to bet
     let amount;
     try {
-      amount = parseInt(args[1], 10);
-      if (amount <= 0) throw new Error("Invalid bet");
+      amount = parseInt(args[1], 10);      
+      if (isNaN(amount) || amount <= 0) throw new Error("Invalid bet");
       const player_money = await getMoney(msg.author.id);
       if (amount > player_money) return msg.reply("You don't have enough money :(");
     } catch (e) {
@@ -526,7 +526,7 @@ const handleCommands = async msg => {
     //Verify user inputted an integer between 2 and 12
     try {
       guess = parseInt(args[0], 10);
-      if (guess < 2 || guess > 12) throw new Error("Invalid guess")
+      if (isNaN(guess) || guess < 2 || guess > 12) throw new Error("Invalid guess")
     } catch (e) {
       return msg.channel.send(
         "**!dice** *[2-12]* *[bet]*: Expects an integer between 2 and 12 inclusive as the first argument"
