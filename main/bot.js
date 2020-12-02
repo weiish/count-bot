@@ -461,6 +461,7 @@ const handleCommands = async msg => {
     }
   } else if (command === "money" || command === "m") {
     let money = await getMoney(msg.author.id)
+    if (money == null) money = 0;
     msg.reply(
       `you have $**${money}**`
     );
@@ -486,6 +487,7 @@ const handleCommands = async msg => {
       amount = parseInt(args[1], 10);      
       if (isNaN(amount) || amount <= 0) throw new Error("Invalid bet");
       const player_money = await getMoney(msg.author.id);
+      if (player_money == null) player_money = 0;
       if (amount > player_money) return msg.reply("You don't have enough money :(");
     } catch (e) {
       return msg.channel.send(
@@ -539,6 +541,7 @@ const handleCommands = async msg => {
       amount = parseInt(args[1], 10);
       if (amount <= 0) throw new Error("Invalid bet");
       const player_money = await getMoney(msg.author.id);
+      if (player_money == null) player_money = 0;
       if (amount > player_money) return msg.reply("You don't have enough money :(");
     } catch (e) {
       return msg.channel.send(
