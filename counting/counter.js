@@ -1,10 +1,20 @@
 const { connection, query } = require("../database/db");
 
+const getCounters = async () => {
+  try {
+    let counters = await query("SELECT * FROM counters");
+    return counters;
+  } catch (e) {
+    return null;
+  }
+}
+
 const loadCounters = async () => {
-  //Load all watching channels into DB
+  //Load all watched channels from DB
   try {
     let counters = await query("SELECT * FROM counters");
     let countersObj = {};
+    //CountersObj is a hashTable with Server_Id as keys, and a list of Channel_Ids as values
     for (let i = 0; i < counters.length; i++) {
       let counter = counters[i];
       let key = counter.server_id;
@@ -88,6 +98,7 @@ const updateCounter = async (server_id, channel_id, count) => {
 };
 
 module.exports = {
+  getCounters,
   loadCounters,
   addCounter,
   remCounter,

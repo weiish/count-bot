@@ -15,16 +15,17 @@ const {
   remAdmin,
   loadAdmins,
   isAdminLocal,
-  isAdminDB
+  isAdminDB,
 } = require("../admin/admin");
 const {
+  getCounters,
   loadCounters,
   addCounter,
   remCounter,
   checkCounter,
   getCounter,
   insertCounter,
-  updateCounter
+  updateCounter,
 } = require("../counting/counter");
 const helper = require("../counting/helper");
 const { CountStats, getMonth, getDay, getHour } = require("../stats/stats");
@@ -33,30 +34,31 @@ const {
   incrementUserNonCountMessages,
   getUserNonCountMessages,
   insertUserNonCountMessages,
-  resetUserNonCountMessages
+  resetUserNonCountMessages,
 } = require("../counting/noncountmessages");
 const { generateHelpMessage } = require("./help");
+const { getMoney, addMoney, insertMoney } = require("../gambling/money");
+const { logGamble } = require("../gambling/gambles");
 const {
-  getMoney,
-  addMoney,
-  insertMoney
-} = require("../gambling/money");
-const {
-  logGamble
-} = require("../gambling/gambles")
+  MessageBuffer,
+  Message,
+  ConvertDiscordMessage,
+} = require("../database/messageBuffer");
+const { debug } = require("console");
 
 let counters = {};
 let admins = {};
 let help_info = {};
+let messageBuffers = {};
 
 client.on("ready", async () => {
   admins = await loadAdmins();
   counters = await loadCounters();
+  messageBuffers = await InitializeMessageBuffers();
   client.user.setActivity(`${config.PREFIX}help`);
-  let owner = await client.fetchUser(keys.CREATOR_ID)
-  owner.send('Ready to go!');
+  let owner = await client.fetchUser(keys.CREATOR_ID);
+  owner.send("Ready to go!");
   console.log(`Logged in as ${client.user.tag}!`);
-  
 });
 
 client.on("messageUpdate", async (oldMsg, newMsg) => {
@@ -64,105 +66,122 @@ client.on("messageUpdate", async (oldMsg, newMsg) => {
   //Check if old message was sent after the most recent count in the channel
   const lastCount = await getCounter(oldMsg.guild.id, oldMsg.channel.id);
   if (lastCount) {
-      if (lastCount.timestamp < oldMsg.createdAt) {
-        await handleCounters(newMsg)
-      } else if (lastCount.message_id === oldMsg.id) {
-        await newMsg.react("❌");
-        await newMsg.channel.send(
-          `Next count is ${lastCount.count+1}`
-        );
-      }
+    if (lastCount.timestamp < oldMsg.createdAt) {
+      await handleCounters(newMsg);
+    } else if (lastCount.message_id === oldMsg.id) {
+      await newMsg.react("❌");
+      await newMsg.channel.send(`Next count is ${lastCount.count + 1}`);
+    }
   }
-})
+});
 
-client.on("message", async msg => {
+client.on("message", async (msg) => {
   if (msg.author.bot) return;
   await handleCounters(msg);
   await handleCommands(msg);
 });
 
-const handleCounters = async msg => {
+const handleCounters = async (msg) => {
   if (msg.content.indexOf(config.PREFIX) === 0) return;
 
   let server_id = msg.guild.id;
   let channel_id = msg.channel.id;
 
-  //Check if current server/channel is being counted
-  let count = await checkCounter(server_id, channel_id);
-  if (!count) return;
+  //Check if current server/channel has a buffer
+  let messageBuffer = messageBuffers[channel_id];
+  let count;
 
-  //Check if user has already contributed to counter within limit
-  let previousUsers = await getLastUsers(
-    server_id,
-    channel_id,
-    count,
-    config.REPEAT_INTERVAL
-  );
-  if (previousUsers) {
-    for (let i = 0; i < previousUsers.length; i++) {
-      if (previousUsers[i].user_id === msg.author.id) {
-        await incrementUserNonCountMessages(
-          server_id,
-          channel_id,
-          msg.author.id
-        );
-        const userNonCountMessages = await getUserNonCountMessages(
-          server_id,
-          channel_id,
-          msg.author.id
-        );
-        if (userNonCountMessages) {
-          if (userNonCountMessages % 5 === 0 && userNonCountMessages > 0) {
-            msg.reply(
-              "This channel is for taking turns counting! You're not counting right!"
-            );
+  if (messageBuffer === undefined) {
+    //No buffer, Check if current server/channel is being counted, and if user has already counted previously
+    count = await checkCounter(server_id, channel_id);
+    if (!count) return;
+
+    let previousUsers = await getLastUsers(
+      server_id,
+      channel_id,
+      count,
+      config.REPEAT_INTERVAL
+    );
+    if (previousUsers) {
+      for (let i = 0; i < previousUsers.length; i++) {
+        if (previousUsers[i].user_id === msg.author.id) {
+          await incrementUserNonCountMessages(
+            server_id,
+            channel_id,
+            msg.author.id
+          );
+          const userNonCountMessages = await getUserNonCountMessages(
+            server_id,
+            channel_id,
+            msg.author.id
+          );
+          if (userNonCountMessages) {
+            if (userNonCountMessages % 5 === 0 && userNonCountMessages > 0) {
+              msg.reply(
+                "This channel is for taking turns counting! You're not counting right!"
+              );
+            }
           }
+          return;
         }
-        return;
       }
     }
+  }
+  //Use buffer to check if the user has already counted
+  else {
+    if (messageBuffer.GetLastCountUser() === msg.author.id) {
+      return;
+    }
+    count = messageBuffer.count;
   }
 
   // Check if the current message is the current count
   let msgIsCount = tryParseAndFindNumber(msg.content, count);
   if (msgIsCount) {
-    await insertMessage(msg, count);
-    await updateCounter(server_id, channel_id, ++count);
-    await msg.react("✅");
-    await resetUserNonCountMessages(server_id, channel_id, msg.author.id);
-    await addMoney(msg.author.id, 1);
+    if (messageBuffer === undefined) {
+      await insertMessage(msg, count);
+      await updateCounter(server_id, channel_id, ++count);
+      await msg.react("✅");
+      await resetUserNonCountMessages(server_id, channel_id, msg.author.id);
+      await addMoney(msg.author.id, 1);
+    }
+    //Use buffer logic
+    else {
+      let shouldReact = messageBuffer.ShouldAddReaction();
+      let message = new Message(ConvertDiscordMessage(msg), count, shouldReact);
+      messageBuffer.AddCount(message);
+      if (shouldReact) await msg.react("✅");
+    }
   } else {
     if (
       msg.content.toLowerCase() === "y" ||
       msg.content.toLowerCase() === "n"
     ) {
       //TODO when doing the command / bot interactions message refactor, apply that here
-    } else {
-      await incrementUserNonCountMessages(server_id, channel_id, msg.author.id);
-      const userNonCountMessages = await getUserNonCountMessages(
-        server_id,
-        channel_id,
-        msg.author.id
-      );
-      if (userNonCountMessages) {
-        await msg.react("❌");
-      }
-      if (userNonCountMessages % 5 === 0) {
-        msg.reply(
-          "This channel is for taking turns counting! You're not counting right!"
-        );
-      }
     }
+    // else {
+    //   await incrementUserNonCountMessages(server_id, channel_id, msg.author.id);
+    //   const userNonCountMessages = await getUserNonCountMessages(
+    //     server_id,
+    //     channel_id,
+    //     msg.author.id
+    //   );
+    //   if (userNonCountMessages) {
+    //     await msg.react("❌");
+    //   }
+    //   if (userNonCountMessages % 5 === 0) {
+    //     msg.reply(
+    //       "This channel is for taking turns counting! You're not counting right!"
+    //     );
+    //   }
+    // }
   }
 };
 
-const handleCommands = async msg => {
+const handleCommands = async (msg) => {
   if (msg.content.indexOf(config.PREFIX) !== 0) return;
 
-  const args = msg.content
-    .slice(config.PREFIX.length)
-    .trim()
-    .split(/ +/g);
+  const args = msg.content.slice(config.PREFIX.length).trim().split(/ +/g);
   const command = args.shift().toLowerCase();
 
   if (isCreator(msg.author.id)) {
@@ -184,8 +203,10 @@ const handleCommands = async msg => {
     } else if (command === "init") {
       //Check if count is already enabled
       let count = await checkCounter(msg.guild.id, msg.channel.id);
-      if (!count) count = 1; 
-      msg.reply("Initializing counts in this channel... I will ask questions if any counts are unsure.");
+      if (!count) count = 1;
+      msg.reply(
+        "Initializing counts in this channel... I will ask questions if any counts are unsure."
+      );
       await initializeCount(
         msg.guild.id,
         msg.channel.id,
@@ -209,7 +230,7 @@ const handleCommands = async msg => {
         "Are you sure you want to untrack this channel? You will have to start over from 1 or go through the initialization process to track it again! (Y/N)"
       );
       const collected = await client.channels.get(msg.channel.id).awaitMessages(
-        async m => {
+        async (m) => {
           if (m.author.bot) return false;
           if (!m.author.id === msg.author.id) return false;
           if (
@@ -222,7 +243,7 @@ const handleCommands = async msg => {
         {
           max: 1,
           time: 120000,
-          errors: ["time"]
+          errors: ["time"],
         }
       );
 
@@ -439,16 +460,10 @@ const handleCommands = async msg => {
       let count = parseInt(args[0]);
       let db_message = await getMessage(msg.guild.id, msg.channel.id, count);
       if (db_message) {
-        let link = `https://discordapp.com/channels/${db_message.server_id}/${
-          db_message.channel_id
-        }/${db_message.message_id}\n`;
+        let link = `https://discordapp.com/channels/${db_message.server_id}/${db_message.channel_id}/${db_message.message_id}\n`;
         let user = await client.fetchUser(db_message.user_id);
         msg.channel.send(
-          `**Count:** ${db_message.count}\n**Sent At:** ${
-            db_message.timestamp
-          }\n**${user.tag}** said "${
-            db_message.message_content
-          }"\n**Link:** ${link}`
+          `**Count:** ${db_message.count}\n**Sent At:** ${db_message.timestamp}\n**${user.tag}** said "${db_message.message_content}"\n**Link:** ${link}`
         );
         //Add link to this message
       } else {
@@ -460,12 +475,10 @@ const handleCommands = async msg => {
       );
     }
   } else if (command === "money" || command === "m") {
-    let money = await getMoney(msg.author.id)
+    let money = await getMoney(msg.author.id);
     if (money == null) money = 0;
-    msg.reply(
-      `you have $**${money}**`
-    );
-  } else if (command === "flip") {            
+    msg.reply(`you have $**${money}**`);
+  } else if (command === "flip") {
     if (args.length < 2) {
       return msg.channel.send(
         "**!flip** *[heads/tails]* *[bet]*: Expects heads or tails as the first argument and a positive integer value for the bet"
@@ -475,7 +488,7 @@ const handleCommands = async msg => {
     let guess = args[0].toLowerCase();
     let win = false;
     //Verify user inputted heads or tails
-    if (guess !== "heads" && guess !== "tails") {  
+    if (guess !== "heads" && guess !== "tails") {
       return msg.channel.send(
         "**!flip** *[heads|tails]* *[bet]*: Expects heads or tails as the first argument"
       );
@@ -484,11 +497,12 @@ const handleCommands = async msg => {
     //Parse amount to bet
     let amount;
     try {
-      amount = parseInt(args[1], 10);      
+      amount = parseInt(args[1], 10);
       if (isNaN(amount) || amount <= 0) throw new Error("Invalid bet");
       const player_money = await getMoney(msg.author.id);
       if (player_money == null) player_money = 0;
-      if (amount > player_money) return msg.reply("You don't have enough money :(");
+      if (amount > player_money)
+        return msg.reply("You don't have enough money :(");
     } catch (e) {
       return msg.channel.send(
         "**!flip** *[heads|tails]* *[bet]*: Expects a positive integer value for the bet"
@@ -500,24 +514,28 @@ const handleCommands = async msg => {
     let result = Math.random();
     if (result >= 0.5) {
       result_text += "**HEADS!**";
-      if (guess === "heads") win = true;      
+      if (guess === "heads") win = true;
     } else {
       result_text += "**TAILS!**";
       if (guess === "tails") win = true;
-    }            
+    }
 
     if (win) {
-      result_text += ` you win $**${amount}**!`
-      await addMoney(msg.author.id, amount)
+      result_text += ` you win $**${amount}**!`;
+      await addMoney(msg.author.id, amount);
     } else {
-      result_text += ` you lost $**${amount}**!`
-      await addMoney(msg.author.id, -amount)
+      result_text += ` you lost $**${amount}**!`;
+      await addMoney(msg.author.id, -amount);
     }
     msg.reply(result_text);
-    await logGamble(msg.author.id, amount, "flip", win ? 1 : 0, (guess === "heads") ? 1 : 0);
-
+    await logGamble(
+      msg.author.id,
+      amount,
+      "flip",
+      win ? 1 : 0,
+      guess === "heads" ? 1 : 0
+    );
   } else if (command === "dice") {
-    
     if (args.length < 2) {
       return msg.channel.send(
         "**!dice** *[2-12]* *[bet]*: Expects an integer between 2 and 12 as the first argument and a positive integer value for the bet"
@@ -528,7 +546,8 @@ const handleCommands = async msg => {
     //Verify user inputted an integer between 2 and 12
     try {
       guess = parseInt(args[0], 10);
-      if (isNaN(guess) || guess < 2 || guess > 12) throw new Error("Invalid guess")
+      if (isNaN(guess) || guess < 2 || guess > 12)
+        throw new Error("Invalid guess");
     } catch (e) {
       return msg.channel.send(
         "**!dice** *[2-12]* *[bet]*: Expects an integer between 2 and 12 inclusive as the first argument"
@@ -542,7 +561,8 @@ const handleCommands = async msg => {
       if (amount <= 0) throw new Error("Invalid bet");
       const player_money = await getMoney(msg.author.id);
       if (player_money == null) player_money = 0;
-      if (amount > player_money) return msg.reply("You don't have enough money :(");
+      if (amount > player_money)
+        return msg.reply("You don't have enough money :(");
     } catch (e) {
       return msg.channel.send(
         "**!dice** *[2-12]* *[bet]*: Expects a positive integer value for the bet"
@@ -553,20 +573,27 @@ const handleCommands = async msg => {
     let result_text = "";
     let roll1 = rollDice(6);
     let roll2 = rollDice(6);
-    let payout_multiplier = 36 / diceodds[guess];    
-    let win = (roll1 + roll2 === guess);
-    
-    result_text += `Rolled **${roll1}** and **${roll2}** for a total of **${roll1 + roll2}**!`;
+    let payout_multiplier = 36 / diceodds[guess];
+    let win = roll1 + roll2 === guess;
+
+    result_text += `Rolled **${roll1}** and **${roll2}** for a total of **${
+      roll1 + roll2
+    }**!`;
 
     if (win) {
-      result_text += ` you win $**${Math.ceil(amount * payout_multiplier - amount)}**!`
-      await addMoney(msg.author.id, Math.ceil(amount * payout_multiplier - amount))
+      result_text += ` you win $**${Math.ceil(
+        amount * payout_multiplier - amount
+      )}**!`;
+      await addMoney(
+        msg.author.id,
+        Math.ceil(amount * payout_multiplier - amount)
+      );
     } else {
-      result_text += ` you lost $**${amount}**!`
-      await addMoney(msg.author.id, -amount)
+      result_text += ` you lost $**${amount}**!`;
+      await addMoney(msg.author.id, -amount);
     }
 
-    result_text += ` Your odds were ${diceodds[guess]} / 36`
+    result_text += ` Your odds were ${diceodds[guess]} / 36`;
     msg.reply(result_text);
     await logGamble(msg.author.id, amount, "dice", win ? 1 : 0, guess);
   }
@@ -574,9 +601,9 @@ const handleCommands = async msg => {
 
 const rollDice = (max) => {
   return 1 + Math.floor(Math.random() * max);
-}
+};
 
-const withOrdinalSuffix = i => {
+const withOrdinalSuffix = (i) => {
   var j = i % 10,
     k = i % 100;
   if (j == 1 && k != 11) {
@@ -635,8 +662,8 @@ const formatEmbed = async (
       title: `***${title}***`,
       color: 1535999,
       //"footer": {text: `Page ${page}`},
-      fields: fields
-    }
+      fields: fields,
+    },
   };
 };
 
@@ -644,7 +671,7 @@ const initializeCount = async (
   server_id,
   channel_id,
   client,
-  count=1,
+  count = 1,
   repeatInterval
 ) => {
   let messages = await getMessages(server_id, channel_id);
@@ -670,14 +697,8 @@ const initializeCount = async (
             if (user.user_id === current_db_message.user_id) {
               //Ask admin if its ok or skip
               let userObj = await client.fetchUser(current_db_message.user_id);
-              let message_entry = `**${userObj.tag}:** ${
-                current_db_message.message_content
-              }\n`;
-              let link = `https://discordapp.com/channels/${
-                current_db_message.server_id
-              }/${current_db_message.channel_id}/${
-                current_db_message.message_id
-              }\n`;
+              let message_entry = `**${userObj.tag}:** ${current_db_message.message_content}\n`;
+              let link = `https://discordapp.com/channels/${current_db_message.server_id}/${current_db_message.channel_id}/${current_db_message.message_id}\n`;
               await client.channels
                 .get(channel_id)
                 .send(
@@ -689,7 +710,7 @@ const initializeCount = async (
               const collected = await client.channels
                 .get(channel_id)
                 .awaitMessages(
-                  async m => {
+                  async (m) => {
                     const isAdmin = await isAdminLocal(
                       admins,
                       m.guild.id,
@@ -706,7 +727,7 @@ const initializeCount = async (
                   {
                     max: 1,
                     time: 120000,
-                    errors: ["time"]
+                    errors: ["time"],
                   }
                 );
 
@@ -772,7 +793,6 @@ const parseDate = (dateString, monthOrDate) => {
   return;
 };
 
-
 const getMessages = async (server_id, channel_id) => {
   let messages = await query(
     `SELECT * FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} ORDER BY id DESC`
@@ -798,7 +818,7 @@ const markMessageCount = async (server_id, channel_id, message_id, count) => {
     `UPDATE messages SET count = ${count} WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND message_id = ${message_id}`
   );
 
-  await checkCounter(server_id, channel_id, async result => {
+  await checkCounter(server_id, channel_id, async (result) => {
     if (result) {
       //NEED UPDATE
       await updateCounter(server_id, channel_id, count);
@@ -812,7 +832,9 @@ const markMessageCount = async (server_id, channel_id, message_id, count) => {
 
 const getLastUsers = async (server_id, channel_id, count, repeatInterval) => {
   let results = await query(
-    `SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count > 0 AND count < ${count} AND count > ${count-repeatInterval-1} ORDER BY count DESC LIMIT ${repeatInterval}`
+    `SELECT user_id FROM messages WHERE server_id = ${server_id} AND channel_id = ${channel_id} AND count > 0 AND count < ${count} AND count > ${
+      count - repeatInterval - 1
+    } ORDER BY count DESC LIMIT ${repeatInterval}`
   );
   return results;
 };
@@ -825,7 +847,7 @@ const tryParseAndFindNumber = (content, target) => {
   const conversion_keys = Object.keys(conversions);
   for (let i = 0; i < conversion_keys.length; i++) {
     if (no_space_content.includes(conversion_keys[i])) {
-      let conversion_regex = new RegExp(conversion_keys[i], "g")
+      let conversion_regex = new RegExp(conversion_keys[i], "g");
       no_space_content = no_space_content.replace(
         conversion_regex,
         conversions[conversion_keys[i]]
@@ -838,16 +860,14 @@ const tryParseAndFindNumber = (content, target) => {
   if (targetRegex.test(no_space_content)) {
     return true;
   }
-  
+
   try {
     let equation = no_space_content.replace(/x/g, "*");
     if (math.evaluate(equation) === target) {
       return true;
     }
-  } catch (e) {
-    
-  }
-  
+  } catch (e) {}
+
   //Try evaluating equations in the content to find the target
   let mathRegex = /(\d+[\+\/\*\-x\^])*(\d+)/g;
   let matches = no_space_content.match(mathRegex);
@@ -872,7 +892,7 @@ const insertMessage = async (message, count) => {
       user_id: message.author.id,
       message_content: message.cleanContent,
       timestamp: message.createdAt,
-      count: count
+      count: count,
     });
     return "Message inserted!";
   } catch (e) {
@@ -891,7 +911,7 @@ const cleanMessages = async (server_id, channel_id) => {
   }
 };
 
-const getInitialLog = async channel => {
+const getInitialLog = async (channel) => {
   //Delay between loops
   let before;
   let limit = 100;
@@ -908,7 +928,7 @@ const getInitialLog = async channel => {
     let newBefore;
 
     let fetched_messages = await channel.fetchMessages({ limit, before });
-    let messages_array = fetched_messages.array()
+    let messages_array = fetched_messages.array();
     //LAST MESSAGE IN ARRAY SHOULD BE EARLIEST MESSAGE
     //get ID of earliest msg
     newBefore = fetched_messages.lastKey();
@@ -920,7 +940,9 @@ const getInitialLog = async channel => {
         continue;
       }
       //See if entry already exists before inserting
-      const query_messsage = await query(`SELECT * FROM messages WHERE message_id = ${message.id}`)
+      const query_messsage = await query(
+        `SELECT * FROM messages WHERE message_id = ${message.id}`
+      );
       if (query_messsage.length === 0) {
         total++;
         await insertMessage(message, -1);
@@ -936,9 +958,7 @@ const getInitialLog = async channel => {
       if (status_msg === 0) {
         status_msg = await channel.send("Fetching...");
       } else {
-        await status_msg.edit(
-          `Fetched ${total} and ignored ${ignored}`
-        );
+        await status_msg.edit(`Fetched ${total} and ignored ${ignored}`);
       }
 
       await sleep(2000);
@@ -960,12 +980,53 @@ const getInitialLog = async channel => {
   try {
     await fetchSomeMessages(channel, limit, before);
   } catch (e) {
-    console.log(e)
+    console.log(e);
   }
-  
+};
+
+const InitializeMessageBuffers = async () => {
+  let counters = await getCounters();
+  let messageBuffers = {}; //Use channel_id as keys, channel_id's are also unique
+
+  for (let i = 0; i < counters.length; i++) {
+    let counter = counters[i];
+    let lastMessage = await getMessage(
+      counter.server_id,
+      counter.channel_id,
+      counter.count - 1
+    );
+    let message = undefined;
+    if (lastMessage !== undefined) {
+      message = new Message(
+        lastMessage,
+        lastMessage.count,
+        lastMessage.hasReaction
+      );
+    }
+    let messageBuffer = new MessageBuffer(
+      counter.server_id,
+      counter.channel_id,
+      counter.count,
+      lastMessage
+    );
+    messageBuffers[counter.channel_id] = messageBuffer;
+  }
+  console.log("Initialized Message Buffers");
+  return messageBuffers;
 };
 
 const sleep = require("util").promisify(setTimeout);
+
+function MinuteTimer() {
+  for (const channel_id in messageBuffers) {
+    let message = messageBuffers[channel_id].Tick();
+    if (message !== undefined) {
+      client.channels.get(channel_id).send(message);
+    }
+  }
+}
+
+setInterval(MinuteTimer, 5000);
 
 let token = process.env.BOT_TOKEN || keys.TOKEN;
 client.login(token);
