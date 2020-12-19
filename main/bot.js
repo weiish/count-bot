@@ -56,23 +56,34 @@ client.on("ready", async () => {
   counters = await loadCounters();
   messageBuffers = await InitializeMessageBuffers();
   client.user.setActivity(`${config.PREFIX}help`);
-  let owner = await client.fetchUser(keys.CREATOR_ID);
+  let owner = await client.users.fetch(keys.CREATOR_ID, true);
   owner.send("Ready to go!");
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
 client.on("messageUpdate", async (oldMsg, newMsg) => {
   if (oldMsg.author.bot) return;
-  //Check if old message was sent after the most recent count in the channel
-  const lastCount = await getCounter(oldMsg.guild.id, oldMsg.channel.id);
-  if (lastCount) {
-    if (lastCount.timestamp < oldMsg.createdAt) {
+
+  let messageBuffer = messageBuffers[oldMsg.channel.id];
+  if (messageBuffer === undefined) {
+    const lastCount = await getCounter(oldMsg.guild.id, oldMsg.channel.id);
+    if (lastCount) {
+      if (lastCount.timestamp < oldMsg.createdAt) {
+        await handleCounters(newMsg);
+      } else if (lastCount.message_id === oldMsg.id) {
+        await newMsg.react("❌");
+        await newMsg.channel.send(`Next count is ${lastCount.count + 1}`);
+      }
+    }
+  } else {
+    if (messageBuffer.GetLastCountTimestamp() < oldMsg.createdAt) {
       await handleCounters(newMsg);
-    } else if (lastCount.message_id === oldMsg.id) {
+    } else if (messageBuffer.GetLastMessageId().message_id === oldMsg.id) {
       await newMsg.react("❌");
       await newMsg.channel.send(`Next count is ${lastCount.count + 1}`);
     }
   }
+  //Check if old message was sent after the most recent count in the channel
 });
 
 client.on("message", async (msg) => {
@@ -139,7 +150,7 @@ const handleCounters = async (msg) => {
   let msgIsCount = tryParseAndFindNumber(msg.content, count);
   if (msgIsCount) {
     if (messageBuffer === undefined) {
-      await insertMessage(msg, count);
+      await insertMessage(msg, count, 1);
       await updateCounter(server_id, channel_id, ++count);
       await msg.react("✅");
       await resetUserNonCountMessages(server_id, channel_id, msg.author.id);
@@ -229,23 +240,25 @@ const handleCommands = async (msg) => {
       await msg.channel.send(
         "Are you sure you want to untrack this channel? You will have to start over from 1 or go through the initialization process to track it again! (Y/N)"
       );
-      const collected = await client.channels.get(msg.channel.id).awaitMessages(
-        async (m) => {
-          if (m.author.bot) return false;
-          if (!m.author.id === msg.author.id) return false;
-          if (
-            m.content.toLowerCase() === "y" ||
-            m.content.toLowerCase() === "n"
-          ) {
-            return true;
+      const collected = await client.channels
+        .fetch(msg.channel.id)
+        .awaitMessages(
+          async (m) => {
+            if (m.author.bot) return false;
+            if (!m.author.id === msg.author.id) return false;
+            if (
+              m.content.toLowerCase() === "y" ||
+              m.content.toLowerCase() === "n"
+            ) {
+              return true;
+            }
+          },
+          {
+            max: 1,
+            time: 120000,
+            errors: ["time"],
           }
-        },
-        {
-          max: 1,
-          time: 120000,
-          errors: ["time"],
-        }
-      );
+        );
 
       final_answer = collected.array()[0].content;
       if (final_answer === "y") {
@@ -290,16 +303,25 @@ const handleCommands = async (msg) => {
     const helpMsg = await generateHelpMessage();
     await msg.author.send(helpMsg);
   } else if (command === "count") {
-    const count = await checkCounter(msg.guild.id, msg.channel.id);
-    const lastUsers = await getLastUsers(
-      msg.guild.id,
-      msg.channel.id,
-      count,
-      config.REPEAT_INTERVAL
-    );
+    let count;
+    let messageBuffer = messageBuffers[msg.channel.id];
     let usernames = "";
-    for (let i = 0; i < lastUsers.length; i++) {
-      const user = await client.fetchUser(lastUsers[i].user_id);
+    let lastUsers;
+    if (messageBuffer === undefined) {
+      count = await checkCounter(msg.guild.id, msg.channel.id);
+      lastUsers = await getLastUsers(
+        msg.guild.id,
+        msg.channel.id,
+        count,
+        config.REPEAT_INTERVAL
+      );
+    } else {
+      count = messageBuffer.GetCount();
+      lastUsers = [{user_id: messageBuffer.GetLastCountUser()}];
+    }    
+
+    for (let i = 0; i < lastUsers.length; i++) {      
+      const user = await client.users.fetch(lastUsers[i].user_id);
       if (i === 0) {
         usernames += user.tag;
       } else {
@@ -461,7 +483,7 @@ const handleCommands = async (msg) => {
       let db_message = await getMessage(msg.guild.id, msg.channel.id, count);
       if (db_message) {
         let link = `https://discordapp.com/channels/${db_message.server_id}/${db_message.channel_id}/${db_message.message_id}\n`;
-        let user = await client.fetchUser(db_message.user_id);
+        let user = await client.users.fetch(db_message.user_id);
         msg.channel.send(
           `**Count:** ${db_message.count}\n**Sent At:** ${db_message.timestamp}\n**${user.tag}** said "${db_message.message_content}"\n**Link:** ${link}`
         );
@@ -477,7 +499,7 @@ const handleCommands = async (msg) => {
   } else if (command === "money" || command === "m") {
     let money = await getMoney(msg.author.id);
     if (money == null) money = 0;
-    msg.reply(`you have $**${money}**`);
+    msg.reply(`you have $**${money}** (If you counted recently, give it 1 minute to update)`);
   } else if (command === "flip") {
     if (args.length < 2) {
       return msg.channel.send(
@@ -622,7 +644,7 @@ const formatMessage = async (title, page, messageArray) => {
   let msg = "";
   msg += `**${title}**\n`;
   for (let i = 0; i < messageArray.length; i++) {
-    let user = await client.fetchUser(messageArray[i][0]);
+    let user = await client.users.fetch(messageArray[i][0]);
     let usertag = user.tag;
     msg += `${i + 1}. **${usertag} - ** ${messageArray[i][1]}\n`;
   }
@@ -640,7 +662,7 @@ const formatEmbed = async (
   let msg = "";
   let msgTemp = "";
   for (let i = 0; i < messageArray.length; i++) {
-    let user = await client.fetchUser(messageArray[i][0]);
+    let user = await client.users.fetch(messageArray[i][0]);
     let usertag = user.tag;
     if (isDates) {
       msgTemp += `**#${i + 1}** ${usertag} - **${moment(
@@ -696,7 +718,9 @@ const initializeCount = async (
             let user = previousUsers[a];
             if (user.user_id === current_db_message.user_id) {
               //Ask admin if its ok or skip
-              let userObj = await client.fetchUser(current_db_message.user_id);
+              let userObj = await client.users.fetch(
+                current_db_message.user_id
+              );
               let message_entry = `**${userObj.tag}:** ${current_db_message.message_content}\n`;
               let link = `https://discordapp.com/channels/${current_db_message.server_id}/${current_db_message.channel_id}/${current_db_message.message_id}\n`;
               await client.channels
@@ -883,7 +907,7 @@ const tryParseAndFindNumber = (content, target) => {
   return false;
 };
 
-const insertMessage = async (message, count) => {
+const insertMessage = async (message, count, hasReaction) => {
   try {
     await query("INSERT INTO messages SET ?", {
       message_id: message.id,
@@ -893,10 +917,11 @@ const insertMessage = async (message, count) => {
       message_content: message.cleanContent,
       timestamp: message.createdAt,
       count: count,
+      hasReaction: hasReaction,
     });
     return "Message inserted!";
   } catch (e) {
-    return "Error inserting message :(";
+    return "Error inserting message: " + e.message;
   }
 };
 
@@ -907,7 +932,7 @@ const cleanMessages = async (server_id, channel_id) => {
     );
     return "Cleaned DB messages for this server!";
   } catch (e) {
-    return "Issue cleaning DB messages for this server... :(";
+    return "Issue cleaning DB messages for this server " + e.message;
   }
 };
 
@@ -945,7 +970,7 @@ const getInitialLog = async (channel) => {
       );
       if (query_messsage.length === 0) {
         total++;
-        await insertMessage(message, -1);
+        await insertMessage(message, -1, 1);
       } else {
         ignored++;
       }
@@ -995,19 +1020,13 @@ const InitializeMessageBuffers = async () => {
       counter.channel_id,
       counter.count - 1
     );
-    let message = undefined;
-    if (lastMessage !== undefined) {
-      message = new Message(
-        lastMessage,
-        lastMessage.count,
-        lastMessage.hasReaction
-      );
-    }
     let messageBuffer = new MessageBuffer(
       counter.server_id,
       counter.channel_id,
       counter.count,
-      lastMessage
+      lastMessage,
+      query,
+      client
     );
     messageBuffers[counter.channel_id] = messageBuffer;
   }
@@ -1017,16 +1036,13 @@ const InitializeMessageBuffers = async () => {
 
 const sleep = require("util").promisify(setTimeout);
 
-function MinuteTimer() {
+async function BufferTimer() {
   for (const channel_id in messageBuffers) {
-    let message = messageBuffers[channel_id].Tick();
-    if (message !== undefined) {
-      client.channels.get(channel_id).send(message);
-    }
+    await messageBuffers[channel_id].Tick();
   }
 }
 
-setInterval(MinuteTimer, 5000);
+setInterval(BufferTimer, 5000);
 
 let token = process.env.BOT_TOKEN || keys.TOKEN;
 client.login(token);

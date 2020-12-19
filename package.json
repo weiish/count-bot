@@ -12,9 +12,9 @@
   "dependencies": {
     "canvas": "^2.6.1",
     "chart.js": "^2.9.4",
-    "chartjs-node-canvas": "^2.4.2",
-    "discord.js": "^11.6.4",
-    "mathjs": "^6.6.5",
+    "chartjs-node-canvas": "^3.0.6",
+    "discord.js": "^12.5.1",
+    "mathjs": "^8.1.0",
     "moment": "^2.29.1",
     "mysql": "^2.18.1"
   }

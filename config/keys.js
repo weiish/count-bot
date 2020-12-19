@@ -4,5 +4,5 @@ if (process.env.NODE_ENV === 'production') { //This is set automatically by hero
     module.exports = require('./prod');
 } else {
     // we are in dev - return the dev keys
-    module.exports = require('./dev');
+    module.exports = require('./dev2');
 }
