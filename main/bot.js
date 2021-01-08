@@ -203,8 +203,9 @@ const handleCommands = async (msg) => {
   }
 
   //Admin commands
-  const isAdmin = await isAdminLocal(admins, msg.guild.id, msg.author.id);
-  if (isAdmin || msg.author.id === msg.guild.ownerID) {
+  const isAdminFromLocal = await isAdminLocal(admins, msg.guild.id, msg.author.id);
+  const isAdminFromDB = await isAdminDB(msg.guild.id, msg.author.id);
+  if (isAdminFromLocal || isAdminFromDB || msg.author.id === msg.guild.ownerID) {
     if (command === "fetch") {
       //Check if count is already enabled
       let count = await checkCounter(msg.guild.id, msg.channel.id);
@@ -240,9 +241,7 @@ const handleCommands = async (msg) => {
       await msg.channel.send(
         "Are you sure you want to untrack this channel? You will have to start over from 1 or go through the initialization process to track it again! (Y/N)"
       );
-      const collected = await client.channels
-        .fetch(msg.channel.id)
-        .awaitMessages(
+      const collected = await msg.channel.awaitMessages(
           async (m) => {
             if (m.author.bot) return false;
             if (!m.author.id === msg.author.id) return false;
