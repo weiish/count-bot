@@ -1,4 +1,5 @@
 const Discord = require("discord.js");
+const { MessageAttachment, EmbedBuilder } = require('discord.js');
 const client = new Discord.Client();
 const keys = require("../config/keys");
 const config = require("../config/config");
@@ -395,8 +396,11 @@ const handleCommands = async (msg) => {
       return;
     }
     let dataUrl = await getChartBuffer(configuration);
-    const attachment = new Discord.Attachment(dataUrl, "tempgraph.png");
-    await msg.channel.send(reply_msg, attachment);
+    const attachment = new MessageAttachment(dataUrl, "tempgraph.png");
+    // const embed = new EmbedBuilder()
+    //   .setTitle(reply_msg)
+    //   .setImage('attachment://tempgraph.png');
+    await msg.channel.send(reply_msg, {files: [attachment]});
   } else if (command === "rank") {
     let myStats = new CountStats();
     await myStats.loadChannelMessages(query, msg.guild.id, msg.channel.id);
