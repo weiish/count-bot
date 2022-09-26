@@ -48,6 +48,7 @@ const {
 const { debug } = require("console");
 
 const clocks = ['🕛', '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚'];
+const checks = ['✅','☑️','👍','😊','💰',]; //maybe implement a random emoji in the future instead of always green checkmarks
 
 let counters = {};
 let admins = {};
