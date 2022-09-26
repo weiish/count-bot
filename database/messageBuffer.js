@@ -1,46 +1,54 @@
+const BufferStates = {
+  Default: 0,
+  FastCount: 1,
+  CatchUp: 2,
+  ReviewFromDowntime: 3,
+}
+
 class MessageBuffer {
+  
   //Currently only supports counts with interval of 1 (people alternate every 1 count), if we want more intervals this needs changed
-  constructor(server_id, channel_id, count, lastMessage, query, client) {
+  constructor(server_id, channel_id, count, lastMessage, query, client) {    
+    
+
     this.server_id = server_id;
     this.channel_id = channel_id;
-    this.check_interval = 5;
     this.count = count;
     this.recentMessages = [];
     this.messagesToWrite = [];
     this.messagesToReact = [];    
     this.hasWrittenAMessage = false;
     this.lastMessage = lastMessage;
-    this.state = 0;
+    this.state = 3;
+    this.initializeTime = Date.now();
+    this.DATABASE_WRITE_INTERVAL = 10000; //in milliseconds    
+    this.REACTION_FETCH_TIME_INTERVAL = 20000; //in milliseconds
+    this.CATCHUP_REACTION_INTERVAL = 2000; //in milliseconds
+    this.INITIALIZATION_DELAY = 10000; // in milliseconds
     this.lastDatabaseWriteTime = Date.now();
-    this.lastReactionFetchTime = Date.now() - 60000;
+    this.lastReactionFetchTime = Date.now() - 20000;
     this.lastCatchUpReactionTime = Date.now();
-    this.lastReaction = 0;
-    this.FAST_MODE_REACT_INTERVAL = 5;
+    this.fastModeReactionCounter = 0;
+    this.FAST_MODE_REACT_INTERVAL = 3;
     this.query = query;
     this.client = client;
 
-    /*
-            States are 
-            0 = default
-            1 = fast count mode
-            2 = catch up mode
-        */
   }
 
   ShouldAddReaction() {
     //Logic to determine based on state whether we should add a reaction for the next valid count
-    if (this.state === 0 || this.state === 2) {
-      this.lastReaction = 1;
+    if (this.state !== BufferStates.FastCount) {
+      this.fastModeReactionCounter = 1;
       return true;
     }
 
     //State = fast count mode
-    if (this.lastReaction >= this.FAST_MODE_REACT_INTERVAL) {
-      this.lastReaction = 1;
+    if (this.fastModeReactionCounter >= this.FAST_MODE_REACT_INTERVAL) {
+      this.fastModeReactionCounter = 1;
       return true;
     }
 
-    this.lastReaction++;
+    this.fastModeReactionCounter++;
     return false;
   }
 
@@ -124,29 +132,29 @@ class MessageBuffer {
   }
 
   async Tick() {    
-    //Move messages out of recentMessages if it has been over a minute for them;
+    //Move messages out of recentMessages (to get written to DB) if it has been over a 30 seconds for them;
     this.ProcessOldMessages();
     await this.UpdateState();
 
-    if (this.state === 2 && this.lastCatchUpReactionTime < Date.now() - 4000) {
+    if (this.state === BufferStates.CatchUp && this.lastCatchUpReactionTime < Date.now() - this.CATCHUP_REACTION_INTERVAL) {
       //Get earliest count from database that needs a count and add a reaction to it
       await this.ReactToOldestMessage();
     }
 
     if (
-      this.lastDatabaseWriteTime < Date.now() - 60000 &&
+      this.lastDatabaseWriteTime < Date.now() - this.DATABASE_WRITE_INTERVAL &&
       this.messagesToWrite.length > 0
     ) {
       await this.WriteMessagesToDatabase();      
     }
 
-    if (this.lastReactionFetchTime < Date.now() - 60000) {
+    if (this.lastReactionFetchTime < Date.now() - this.REACTION_FETCH_TIME_INTERVAL) {
         await this.FetchMessagesToReact();
     }
   }
 
-  ProcessOldMessages() {
-    const cutoffTime = new Date(Date.now() - 60000);
+  ProcessOldMessages(cutoffTime) {
+    cutoffTime = typeof cutoffTime !== "undefined" ? cutoffTime : new Date(Date.now() - this.DATABASE_WRITE_INTERVAL);    
     let j = this.recentMessages.length;
     let moved = 0;
     for (let i = 0; i < j; i++) {
@@ -165,7 +173,7 @@ class MessageBuffer {
 
   async FetchMessagesToReact() {
       
-      this.lastReactionFetchTime = Date.now();
+    this.lastReactionFetchTime = Date.now();
     this.messagesToReact = await this.query(`SELECT * FROM messages WHERE server_id = ${this.server_id} AND channel_id = ${this.channel_id} AND hasReaction = 0 ORDER BY timestamp ASC`);   
     if (this.messagesToReact.length > 0) console.log(`Fetched ${this.messagesToReact.length} messages to react to for channel ${this.channel_id}`);
     //console.log(this.messagesToReact);
@@ -195,24 +203,32 @@ class MessageBuffer {
   }
 
   async UpdateState() {
-    if (this.recentMessages.length > 5 && this.state !== 1) {
-      this.state = 1;
+    if (this.state === BufferStates.ReviewFromDowntime) {
+      if (this.initializeTime < Date.now() - this.INITIALIZATION_DELAY && this.recentMessages.length === 0) {
+        this.state = BufferStates.CatchUp;
+        console.log(this.channel_id + " changed to catch up mode");
+      }
+      return;
+    }
+
+    if (this.recentMessages.length > 10 && this.state !== BufferStates.FastCount) {
+      this.state = BufferStates.FastCount;
       console.log(this.channel_id + " changed to fast mode");
       //Send message saying we're entering fast mode so only every 5 counts will get a reaction
       let channel = await this.client.channels.cache.get(this.channel_id)
       if (channel === undefined) {
         channel = await this.client.channels.fetch(this.channel_id);
       }
-      await channel.send("Detected a lot of counts. Fast Count Mode Activated. Every **5th count** will get a reaction");
-    } else if (this.recentMessages.length === 0 && this.state !== 2) {
-      this.state = 2; //Catch up mode
+      await channel.send("Detected a lot of counts. Fast Count Mode Activated. Every **3rd count** will get a check mark\nbecause the bot can't react fast enough with rate limitations. (It will fill in the check marks later after y'all calm down)");
+    } else if (this.recentMessages.length === 0 && this.state !== BufferStates.CatchUp) {
+      this.state = BufferStates.CatchUp;
       console.log(this.channel_id + " changed to catch up mode");
     } else if (
-      this.recentMessages.length < 5 &&
+      this.recentMessages.length < 10 &&
       this.recentMessages.length > 0 &&
-      this.state !== 0
+      this.state !== BufferStates.Default
     ) {
-      this.state = 0; //Default mode
+      this.state = BufferStates.Default; //Default mode
       console.log(this.channel_id + " changed to default mode");
     }
   }

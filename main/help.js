@@ -12,7 +12,7 @@ const generateHelpMessage = async () => {
         ['latest', 'Gets list of the latest counters and how long it\'s been since their last count'],
         ['earliest', 'Gets list of the earliest counters and how long it\'s been since their first count'],
         ['plot [my|all] [month|day|hour]', 'Plots a graph of (your or the whole server\'s) counts grouped by month, day of the week, or hour of the day'],
-        ['rank [month|date|all(default)] [MM/YYYY|MM/DD/YYYY]', 'Gets a list of rankings of all time by default, or with arguments you can rankings of specific months or dates'],
+        ['rank/top [month|date|all(default)] [MM/YYYY|MM/DD/YYYY]', 'Gets a list of rankings of all time by default, or with arguments you can rankings of specific months or dates'],
         ['review [count_number]', 'Outputs details of the message that was sent for a specified count'],
         ['money', 'Shows how much money you have (Count to get more)'],
         ['flip [heads|tails] [bet]', 'Bet money on a coin flip'],

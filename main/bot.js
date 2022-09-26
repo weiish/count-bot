@@ -47,6 +47,8 @@ const {
 } = require("../database/messageBuffer");
 const { debug } = require("console");
 
+const clocks = ['🕛', '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚'];
+
 let counters = {};
 let admins = {};
 let help_info = {};
@@ -60,6 +62,7 @@ client.on("ready", async () => {
   let owner = await client.users.fetch(keys.CREATOR_ID, true);
   owner.send("Ready to go!");
   console.log(`Logged in as ${client.user.tag}!`);
+  await FetchMessagesSinceLastBotUptime();
 });
 
 client.on("messageUpdate", async (oldMsg, newMsg) => {
@@ -146,7 +149,8 @@ const handleCounters = async (msg) => {
     }
     count = messageBuffer.count;
   }
-
+  
+  console.log(`parsing message id ${msg.id} content ${msg.content}`);
   // Check if the current message is the current count
   let msgIsCount = tryParseAndFindNumber(msg.content, count);
   if (msgIsCount) {
@@ -211,9 +215,9 @@ const handleCommands = async (msg) => {
       //Check if count is already enabled
       let count = await checkCounter(msg.guild.id, msg.channel.id);
       if (count) return msg.reply("This channel is already being tracked!");
-      msg.reply("Fetching all messages in this channel...");
+      msg.reply("Fetching all messages in this channel... I will notify you when it is complete");
       await getInitialLog(msg.channel);
-    } else if (command === "init") {
+    } else if (command === "init" || command === "initialize") {
       //Check if count is already enabled
       let count = await checkCounter(msg.guild.id, msg.channel.id);
       if (!count) count = 1;
@@ -232,6 +236,7 @@ const handleCommands = async (msg) => {
       if (count) return msg.reply("This channel is already being tracked!");
 
       await addCounter(counters, msg.guild.id, msg.channel.id, 1);
+      AddNewMessageBuffer(messageBuffers, msg.guild.id, msg.channel.id);
       msg.reply(
         "This channel is now being tracked starting at **1**!\n*Note that if you want to start at a higher number you'll need to **!fetch** then **!initialize** instead."
       );
@@ -262,6 +267,7 @@ const handleCommands = async (msg) => {
 
       final_answer = collected.array()[0].content;
       if (final_answer === "y") {
+        delete messageBuffers[msg.channel.id];
         const remResult = await remCounter(
           counters,
           msg.guild.id,
@@ -308,13 +314,8 @@ const handleCommands = async (msg) => {
     let usernames = "";
     let lastUsers;
     if (messageBuffer === undefined) {
-      count = await checkCounter(msg.guild.id, msg.channel.id);
-      lastUsers = await getLastUsers(
-        msg.guild.id,
-        msg.channel.id,
-        count,
-        config.REPEAT_INTERVAL
-      );
+      await msg.reply("This channel is not being tracked!");
+      return;
     } else {
       count = messageBuffer.GetCount();
       lastUsers = [{user_id: messageBuffer.GetLastCountUser()}];
@@ -401,7 +402,7 @@ const handleCommands = async (msg) => {
     //   .setTitle(reply_msg)
     //   .setImage('attachment://tempgraph.png');
     await msg.channel.send(reply_msg, {files: [attachment]});
-  } else if (command === "rank") {
+  } else if (command === "rank" || command === "top") {
     let myStats = new CountStats();
     await myStats.loadChannelMessages(query, msg.guild.id, msg.channel.id);
     let reply_msg = "";
@@ -726,7 +727,7 @@ const initializeCount = async (
               );
               let message_entry = `**${userObj.tag}:** ${current_db_message.message_content}\n`;
               let link = `https://discordapp.com/channels/${current_db_message.server_id}/${current_db_message.channel_id}/${current_db_message.message_id}\n`;
-              await client.channels
+              await client.channels.cache
                 .get(channel_id)
                 .send(
                   `Found match for count **${count}** but the user repeat interval is wrong\n` +
@@ -734,7 +735,7 @@ const initializeCount = async (
                     link +
                     "Should I allow this? (Y/N) admin only"
                 );
-              const collected = await client.channels
+              const collected = await client.channels.cache
                 .get(channel_id)
                 .awaitMessages(
                   async (m) => {
@@ -786,12 +787,13 @@ const initializeCount = async (
         "No message log found for this channel, use **!fetch** first! (admin only)"
       );
   }
-  await client.channels
+  await client.channels.cache
     .get(channel_id)
     .send("Done initializing counters! Found counters up to " + count);
   //"If I'm missing a number, add it with **!addcount** *count_value* *message_id*\n" +
   //"Then use the command **!updatecount**"
   await addCounter(counters, server_id, channel_id, count);
+  await AddNewMessageBuffer(messageBuffers, server_id, channel_id, count);
 };
 
 const parseDate = (dateString, monthOrDate) => {
@@ -955,7 +957,7 @@ const getInitialLog = async (channel) => {
   ) => {
     let newBefore;
 
-    let fetched_messages = await channel.fetchMessages({ limit, before });
+    let fetched_messages = await channel.messages.fetch({ limit, before });
     let messages_array = fetched_messages.array();
     //LAST MESSAGE IN ARRAY SHOULD BE EARLIEST MESSAGE
     //get ID of earliest msg
@@ -1012,6 +1014,91 @@ const getInitialLog = async (channel) => {
   }
 };
 
+const FetchMessagesSinceLastBotUptime = async () => {
+  let counters = await getCounters();
+  let limit = 10;
+  let clockCounter = 0;
+  for (let i = 0; i < counters.length; i++) {
+    let tempMessage;
+    let counter = counters[i];
+    let lastMessage = await getMessage(
+      counter.server_id,
+      counter.channel_id,
+      counter.count - 1
+    );
+    let channel = client.channels.cache.get(counter.channel_id);  
+
+    const ProcessSomeMessages = async (
+      channel,
+      limit = 100,
+      after,
+      total = 0,
+      ignored = 0,
+      status_msg = 0
+    ) => {
+      let newAfter;
+  
+      let fetched_messages = await channel.messages.fetch({ limit:10, after});
+      let messages_array = fetched_messages.array();
+      console.log(`Fetched ${messages_array.length} messages`);
+
+      if (messages_array.length > 0) {
+        if (tempMessage === undefined) {
+          tempMessage = await channel.send(`Found some messages since I was last running, catching up... please wait... ${clocks[clockCounter]}`);          
+          clockCounter++;
+          if (clockCounter >= clocks.length) clockCounter = 0;
+        }        
+        else {
+          await tempMessage.edit(`Found some messages since I was last running, catching up... please wait... ${clocks[clockCounter]}`);
+        }
+      }
+      //LAST MESSAGE IN ARRAY SHOULD BE LAST MESSAGE
+      //get ID of last msg
+      newAfter = messages_array[0]?.id;
+
+      for (let i = messages_array.length - 1; i >= 0; i--) {
+        let message = messages_array[i];
+        if (message.author.bot) {
+          ignored++;
+          continue;
+        } else {
+          total++;
+          await handleCounters(message);
+        }
+      }
+  
+      //RECURSE IF MORE MESSAGES
+      let numMessagesFetched = messages_array.length;
+      if (numMessagesFetched >= limit) {
+        await sleep(2000);
+        return await ProcessSomeMessages(
+          channel,
+          limit,          
+          newAfter,
+          total,
+          ignored,
+          status_msg
+        );
+      } else {
+        if (tempMessage !== undefined) {
+          tempMessage.delete();
+          tempMessage = await channel.send(
+            `Done catching up ${total} message(s) 😊`
+          );
+          setTimeout(() => tempMessage.delete(), 5000)
+        }                
+      }
+    };
+  
+    try {
+      await ProcessSomeMessages(channel, limit, lastMessage.message_id);
+    } catch (e) {
+      console.log(e);
+    }
+    
+  }
+}
+
 const InitializeMessageBuffers = async () => {
   let counters = await getCounters();
   let messageBuffers = {}; //Use channel_id as keys, channel_id's are also unique
@@ -1037,6 +1124,18 @@ const InitializeMessageBuffers = async () => {
   return messageBuffers;
 };
 
+const AddNewMessageBuffer = async (existingBuffers, server_id, channel_id, count = 1) => {
+  let newBuffer = new MessageBuffer(
+    server_id,
+    channel_id,
+    count,
+    undefined,
+    query,
+    client
+  );
+  existingBuffers[channel_id] = newBuffer;
+}
+
 const sleep = require("util").promisify(setTimeout);
 
 async function BufferTimer() {
@@ -1045,7 +1144,7 @@ async function BufferTimer() {
   }
 }
 
-setInterval(BufferTimer, 5000);
+setInterval(BufferTimer, 2000);
 
 let token = process.env.BOT_TOKEN || keys.TOKEN;
 client.login(token);
