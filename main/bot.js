@@ -48,7 +48,6 @@ const {
 const { debug } = require("console");
 
 const clocks = ['🕛', '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚'];
-const checks = ['✅','☑️','👍','😊','💰',]; //maybe implement a random emoji in the future instead of always green checkmarks
 
 let counters = {};
 let admins = {};
@@ -1017,9 +1016,9 @@ const getInitialLog = async (channel) => {
 
 const FetchMessagesSinceLastBotUptime = async () => {
   let counters = await getCounters();
-  let limit = 10;
-  let clockCounter = 0;
+  let limit = 10;  
   for (let i = 0; i < counters.length; i++) {
+    let clockCounter = 0;
     let tempMessage;
     let counter = counters[i];
     let lastMessage = await getMessage(
@@ -1027,7 +1026,7 @@ const FetchMessagesSinceLastBotUptime = async () => {
       counter.channel_id,
       counter.count - 1
     );
-    let channel = client.channels.cache.get(counter.channel_id);  
+    let channel = client.channels.cache.get(counter.channel_id);
 
     const ProcessSomeMessages = async (
       channel,
@@ -1043,15 +1042,15 @@ const FetchMessagesSinceLastBotUptime = async () => {
       let messages_array = fetched_messages.array();
       console.log(`Fetched ${messages_array.length} messages`);
 
-      if (messages_array.length > 0) {
+      if (messages_array.length > 0) {        
         if (tempMessage === undefined) {
-          tempMessage = await channel.send(`Found some messages since I was last running, catching up... please wait... ${clocks[clockCounter]}`);          
-          clockCounter++;
-          if (clockCounter >= clocks.length) clockCounter = 0;
+          tempMessage = await channel.send(`Found some messages since I was last running, catching up... please wait... ${clocks[clockCounter]}`);                    
         }        
         else {
           await tempMessage.edit(`Found some messages since I was last running, catching up... please wait... ${clocks[clockCounter]}`);
         }
+        clockCounter++;
+        if (clockCounter >= clocks.length) clockCounter = 0;
       }
       //LAST MESSAGE IN ARRAY SHOULD BE LAST MESSAGE
       //get ID of last msg
@@ -1070,8 +1069,7 @@ const FetchMessagesSinceLastBotUptime = async () => {
   
       //RECURSE IF MORE MESSAGES
       let numMessagesFetched = messages_array.length;
-      if (numMessagesFetched >= limit) {
-        await sleep(2000);
+      if (numMessagesFetched >= limit) {        
         return await ProcessSomeMessages(
           channel,
           limit,          
