@@ -9,6 +9,19 @@ const { connection, query } = require("../database/db");
 const moment = require("moment");
 const math = require("mathjs");
 
+process.on("uncaughtException", (error) => {
+  console.error("========== UNCAUGHT EXCEPTION ==========");
+  console.error(error);
+  console.error(error.stack);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("========== UNHANDLED REJECTION ==========");
+  console.error("Promise:", promise);
+  console.error("Reason:", reason);
+  if (reason?.stack) console.error(reason.stack);
+});
+
 //Custom Files
 const {
   isCreator,
@@ -196,6 +209,13 @@ const handleCounters = async (msg) => {
 
 const handleCommands = async (msg) => {
   if (msg.content.indexOf(config.PREFIX) !== 0) return;
+  if (!msg.guild) {
+    return;
+  }
+
+  if (msg.author.bot) {
+    return;
+  }
 
   const args = msg.content.slice(config.PREFIX.length).trim().split(/ +/g);
   const command = args.shift().toLowerCase();
